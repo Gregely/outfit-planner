@@ -1,0 +1,103 @@
+@import "tailwindcss";
+@import "@fontsource-variable/fraunces/opsz.css";
+@import "@fontsource-variable/inter/index.css";
+
+@theme {
+  --font-serif: "Fraunces Variable", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  --color-paper: #f4efe6;
+  --color-paper-deep: #ebe4d6;
+  --color-card: #fbf9f4;
+  --color-ink: #26211d;
+  --color-ink-soft: #4a423b;
+  --color-muted: #7a7065;
+  --color-line: #e0d7c6;
+  --color-line-strong: #cdbfa8;
+  --color-accent: #7a2e2a;
+  --color-accent-soft: #f1e1dc;
+  --color-moss: #4c5a39;
+  --color-moss-soft: #e5e9da;
+  --color-gold: #a8823f;
+  --color-gold-soft: #f3e8d2;
+  --color-sky: #3d5a80;
+  --color-sky-soft: #e1e8f1;
+  --color-danger: #a33a2b;
+
+  --shadow-card: 0 1px 0 rgb(38 33 29 / 0.04), 0 8px 24px -16px rgb(38 33 29 / 0.25);
+  --radius-card: 1rem;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  /* faint paper grain */
+  background-image: radial-gradient(rgb(38 33 29 / 0.035) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+h1,
+h2,
+h3,
+.font-serif {
+  font-family: var(--font-serif);
+  font-optical-sizing: auto;
+}
+
+::selection {
+  background: var(--color-accent-soft);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+@layer components {
+  .eyebrow {
+    @apply text-[0.68rem] font-semibold tracking-[0.16em] text-muted uppercase;
+  }
+  .card {
+    @apply rounded-[var(--radius-card)] border border-line bg-card shadow-[var(--shadow-card)];
+  }
+  .input {
+    @apply w-full rounded-lg border border-line-strong bg-white/70 px-3 py-2 text-sm text-ink placeholder:text-muted/70 transition focus:border-accent focus:bg-white focus:outline-none focus:ring-2 focus:ring-accent/15 disabled:opacity-60;
+  }
+  .link {
+    @apply underline decoration-line-strong underline-offset-4 hover:decoration-accent;
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.25s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
