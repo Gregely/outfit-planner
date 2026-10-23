@@ -137,7 +137,8 @@ describe("Claude stylist with hard-constraint validation", () => {
   it.each([
     ["rate limit", () => new Anthropic.RateLimitError(429, undefined, "rate limited", new Headers()), /rate-limited/],
     ["network", () => new Anthropic.APIConnectionError({ message: "offline" }), /couldn't be reached/],
-    ["malformed", () => new Anthropic.AnthropicError("Failed to parse structured output"), /couldn't be validated/],
+    ["unexpected SDK", () => new Anthropic.AnthropicError("socket hang up"), /returned an error: socket hang up/],
+    ["bad request", () => new Anthropic.BadRequestError(400, { type: "error", error: { type: "invalid_request_error", message: "Schema is too complex for compilation" } }, "400", new Headers({ "request-id": "req_123" })), /rejected the request.*Schema is too complex.*req_123/],
     ["auth", () => new Anthropic.AuthenticationError(401, undefined, "bad key", new Headers()), /rejected/],
   ])("falls back without crashing on %s errors", async (_label, makeErr, notice) => {
     seedSample();

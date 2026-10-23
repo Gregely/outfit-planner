@@ -4,8 +4,9 @@ import { getDb } from "@/server/db";
 import { garmentInputSchema, type GarmentInput } from "@/lib/schemas";
 import { defaultLayeringRole, type GarmentDetails } from "@/lib/domain";
 import { toColour } from "@/lib/colours";
-import { AiUnavailableError, REASON_TEXT, aiStatus } from "@/server/ai/client";
-import { aiExtractGarments, type AiGarment } from "@/server/ai/tasks";
+import { AiUnavailableError, REASON_TEXT, aiStatus, describeAiError } from "@/server/ai/client";
+import { aiExtractGarments, UNSPECIFIED, type AiGarment } from "@/server/ai/tasks";
+import { estimateTraits } from "@/lib/garment-traits";
 import { parseWardrobeText } from "@/server/import/heuristic";
 import { BadRequestError } from "@/server/errors";
 import { createGarment, fillMissingFields, findDuplicates, type DuplicateMatch, type GarmentView } from "./garments";
@@ -27,37 +28,44 @@ export type ImportProposal = {
 
 export type ExtractResult = { method: ImportMethod; proposals: ImportProposal[]; notice: string | null };
 
-const clamp = (n: number | null, fallback: number) => (n === null ? fallback : Math.min(5, Math.max(1, Math.round(n))));
+const known = <T extends string>(v: T): Exclude<T, typeof UNSPECIFIED> | null => (v === UNSPECIFIED ? null : (v as Exclude<T, typeof UNSPECIFIED>));
+const text = (v: string, max: number) => v.trim().slice(0, max) || null;
 
+/** Translate Claude's record (with "" / "unspecified" / 0 meaning unknown) into a garment proposal. */
 export function fromAiGarment(g: AiGarment): { input: GarmentInput; assumed: string[] } {
-  const assumed = new Set(g.estimated_fields.map((f) => f.toLowerCase()));
-  if (g.warmth === null) assumed.add("warmth");
-  if (g.formality === null) assumed.add("formality");
-  if (g.colours.length === 0) assumed.add("colours");
-  const details = Object.fromEntries(Object.entries(g.details).filter(([, v]) => v !== null)) as GarmentDetails;
-  return {
-    assumed: [...assumed],
-    input: {
-      name: g.name.slice(0, 120) || "Unnamed garment",
-      category: g.category,
-      subcategory: g.subcategory?.toLowerCase().slice(0, 60) ?? null,
-      colours: g.colours.slice(0, 6).map((c) => toColour(c.name, c.hex)),
-      pattern: g.pattern ?? "solid",
-      materials: g.materials.map((m) => m.toLowerCase()).slice(0, 8),
-      fit: g.fit,
-      silhouette: g.silhouette?.slice(0, 60) ?? null,
-      layeringRole: g.layering_role ?? defaultLayeringRole(g.category, g.subcategory),
-      warmth: clamp(g.warmth, 3),
-      formality: clamp(g.formality, 3),
-      seasons: g.seasons,
-      weather: g.weather,
-      occasions: g.occasions.slice(0, 12),
-      styleTags: g.style_tags.slice(0, 12),
-      brand: g.brand?.slice(0, 80) ?? null,
-      notes: g.notes?.slice(0, 2000) ?? null,
-      details,
-    },
+  const assumed = new Set(g.estimated_fields.map((f) => f.toLowerCase().replace(/_/g, " ")));
+  const subcategory = text(g.subcategory.toLowerCase(), 60);
+  const materials = g.materials.map((m) => m.trim().toLowerCase()).filter(Boolean).slice(0, 8);
+  const estimate = estimateTraits({ category: g.category, subcategory, name: g.name, materials });
+  const score = (v: number, fallback: number, field: string) => {
+    if (Number.isInteger(v) && v >= 1 && v <= 5) return v;
+    assumed.add(field);
+    return fallback;
   };
+  if (g.colours.length === 0) assumed.add("colours");
+  const details = Object.fromEntries(Object.entries(g.details).filter(([, v]) => v !== UNSPECIFIED)) as GarmentDetails;
+  const input: GarmentInput = {
+    name: text(g.name, 120) ?? "Unnamed garment",
+    category: g.category,
+    subcategory,
+    colours: g.colours.filter((c) => c.name.trim()).slice(0, 6).map((c) => toColour(c.name, c.hex || null)),
+    pattern: known(g.pattern) ?? "solid",
+    materials,
+    fit: known(g.fit),
+    silhouette: text(g.silhouette, 60),
+    layeringRole: known(g.layering_role) ?? defaultLayeringRole(g.category, subcategory),
+    warmth: score(g.warmth, estimate.warmth, "warmth"),
+    formality: score(g.formality, estimate.formality, "formality"),
+    seasons: g.seasons,
+    weather: g.weather,
+    occasions: g.occasions.map((o) => o.trim().toLowerCase()).filter(Boolean).slice(0, 12),
+    styleTags: g.style_tags.map((o) => o.trim().toLowerCase()).filter(Boolean).slice(0, 12),
+    brand: text(g.brand, 80),
+    notes: text(g.notes, 2000),
+    details,
+  };
+  // read `assumed` only after the scores above have added the fields they estimated
+  return { input, assumed: [...assumed] };
 }
 
 function finalise(items: { input: GarmentInput; assumed: string[]; sourceText: string; errors?: string[] }[]): ImportProposal[] {
@@ -104,7 +112,7 @@ export async function extractGarmentsFromText(text: string, opts: { useAi?: bool
         notice = "Claude didn't find any garments in that text; tried the offline parser instead.";
       } catch (err) {
         if (!(err instanceof AiUnavailableError)) throw err;
-        notice = `${capitalise(REASON_TEXT[err.reason])}. Used the offline parser instead – please check each field.`;
+        notice = `Claude couldn't read it – ${describeAiError(err)}. Used the offline parser instead; please check each field.`;
       }
     } else {
       notice = `${capitalise(REASON_TEXT[status.reason!])}. Used the offline parser – please check each field.`;

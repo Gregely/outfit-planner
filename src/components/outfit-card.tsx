@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { OutfitView, OutfitItemView } from "@/server/services/outfits";
 import type { GarmentView } from "@/server/services/garments";
@@ -41,6 +41,23 @@ export function OutfitCard({ outfit, dayDate, today, compact, onReplaceWith, hid
   const [swapItem, setSwapItem] = useState<OutfitItemView | null>(null);
   const [dialog, setDialog] = useState<null | "wear" | "plan" | "edit" | "adjust" | "combine" | "dislike">(null);
   const [menu, setMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  // Close the actions menu on an outside press or Escape, and whenever the card is hidden
+  // (Next keeps visited routes mounted inside <Activity>; a menu shouldn't reappear open).
+  useEffect(() => {
+    if (!menu) return;
+    const onDown = (e: PointerEvent) => {
+      if (!menuRef.current?.contains(e.target as Node)) setMenu(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setMenu(false);
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menu]);
+  useLayoutEffect(() => () => setMenu(false), []);
 
   const reload = async () => {
     const res = await api<{ outfit: OutfitView }>(`/api/outfits/${o.id}`);
@@ -140,12 +157,12 @@ export function OutfitCard({ outfit, dayDate, today, compact, onReplaceWith, hid
           <Button size="sm" onClick={() => setDialog("adjust")}>
             <WandIcon size={14} /> Adjust
           </Button>
-          <div className="relative ml-auto">
+          <div className="relative ml-auto" ref={menuRef}>
             <Button size="sm" variant="ghost" aria-label="More actions" aria-expanded={menu} onClick={() => setMenu((m) => !m)}>
               <MenuDotsIcon size={16} />
             </Button>
             {menu ? (
-              <div className="card absolute right-0 bottom-9 z-20 w-56 p-1 text-sm" onMouseLeave={() => setMenu(false)}>
+              <div role="menu" className="card absolute right-0 bottom-9 z-20 w-56 p-1 text-sm">
                 {[
                   { label: "Rename / tag", icon: EditIcon, act: () => setDialog("edit") },
                   {
@@ -166,6 +183,7 @@ export function OutfitCard({ outfit, dayDate, today, compact, onReplaceWith, hid
                   <button
                     key={label}
                     type="button"
+                    role="menuitem"
                     className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-paper-deep"
                     onClick={() => {
                       setMenu(false);
@@ -497,7 +515,7 @@ function AdjustDialog({ open, onClose, outfit, dayDate, onUse }: { open: boolean
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
             <Field label="Or describe it (uses Claude when available)" className="flex-1">
-              <input className="input" value={instruction} onChange={(e) => setInstruction(e.target.value)} placeholder="e.g. swap in something burgundy, keep the boots" />
+              <input className="input" value={instruction} onChange={(e) => setInstruction(e.target.value)} placeholder="e.g. something warmer, keep the shoes" />
             </Field>
             <Button variant="primary" disabled={!instruction.trim()} busy={pending === "adjust"} onClick={() => go(null)}>
               Adjust

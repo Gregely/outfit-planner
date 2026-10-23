@@ -108,7 +108,7 @@ describe("dates", () => {
 describe("offline text parsers", () => {
   it("splits several garments and keeps the user's words", () => {
     const res = parseWardrobeText("A cream cable-knit wool jumper, navy chinos and brown suede chelsea boots. Also a grey herringbone overcoat.");
-    expect(res.map((r) => r.input.subcategory)).toEqual(["cable knit", "chinos", "chelsea boots", "overcoat"]);
+    expect(res.map((r) => r.input.subcategory)).toEqual(["jumper", "chinos", "chelsea boots", "overcoat"]);
     expect(res[0].input.materials).toContain("wool");
     expect(res[2].input.materials).toContain("suede");
     expect(res[3].input.pattern).toBe("herringbone");

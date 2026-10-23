@@ -1,7 +1,7 @@
 import "server-only";
 import type { ActivityInput } from "@/lib/schemas";
 import type { DressCode } from "@/lib/domain";
-import { AiUnavailableError, REASON_TEXT, aiStatus } from "@/server/ai/client";
+import { AiUnavailableError, aiStatus, describeAiError } from "@/server/ai/client";
 import { aiParseActivities } from "@/server/ai/tasks";
 import { BadRequestError } from "@/server/errors";
 
@@ -98,13 +98,13 @@ export async function parseDayPlan(text: string, date: string, opts: { useAi?: b
               endTime: a.end_time && HHMM.test(a.end_time) ? a.end_time : null,
               dressCode: a.dress_code,
               setting: a.setting,
-              notes: a.notes?.slice(0, 500) ?? null,
+              notes: a.notes.trim().slice(0, 500) || null,
             }),
           ),
         };
       } catch (err) {
         if (!(err instanceof AiUnavailableError)) throw err;
-        notice = `${REASON_TEXT[err.reason]} – used the offline parser.`;
+        notice = `Claude couldn't read it – ${describeAiError(err)}. Used the offline parser.`;
       }
     }
   }

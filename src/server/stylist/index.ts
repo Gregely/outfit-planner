@@ -5,7 +5,7 @@ import { validateOutfit, type HardConstraints } from "@/lib/outfit-rules";
 import { addDays, weekDates } from "@/lib/dates";
 import type { Garment } from "@/server/db/schema";
 import { BadRequestError, ConflictError } from "@/server/errors";
-import { AiUnavailableError, REASON_TEXT, aiStatus } from "@/server/ai/client";
+import { AiUnavailableError, REASON_TEXT, aiStatus, describeAiError } from "@/server/ai/client";
 import { aiAdjustOutfit, aiPlanWeek, aiReplaceGarment, aiSuggestOutfits, type StylistPromptParts } from "@/server/ai/tasks";
 import { getSettings, getCareDefaults, today } from "@/server/services/settings";
 import { careFor } from "@/server/services/garments";
@@ -28,7 +28,7 @@ type Draft = { garmentIds: number[]; name: string; explanation: string; source: 
 const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 function aiNotice(err: unknown): string {
-  if (err instanceof AiUnavailableError) return `${capitalise(REASON_TEXT[err.reason])} – showing rule-based suggestions instead.`;
+  if (err instanceof AiUnavailableError) return `${capitalise(describeAiError(err))} – showing rule-based suggestions instead.`;
   return "Claude couldn't help this time – showing rule-based suggestions instead.";
 }
 

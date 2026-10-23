@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { api, errorMessage } from "@/lib/client-api";
 import { Button, cx } from "./ui";
@@ -93,29 +93,47 @@ export function Modal({
   wide?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const pressedOnBackdrop = useRef(false);
+  /** set while *we* close the native dialog, so its asynchronous `close` event isn't read as a dismissal */
+  const closingProgrammatically = useRef(false);
+  // Keep the native <dialog> in sync with `open`. The cleanup closes it when the effect is torn
+  // down – unmount, Strict Mode's extra mount cycle, or Next's <Activity> hiding the route – and
+  // the next run reopens it, so content and form state survive. Closing here is never a dismissal:
+  // only the user (Escape, backdrop, close button) calls onClose.
   useEffect(() => {
     const d = ref.current;
-    if (!d) return;
-    if (open && !d.open) d.showModal();
-    if (!open && d.open) d.close();
-  }, [open]);
-  // close if the route is hidden by navigation (Activity keeps components mounted)
-  useLayoutEffect(() => {
-    const d = ref.current;
+    if (!open || !d) return;
+    if (!d.open) d.showModal();
     return () => {
-      if (d?.open) d.close();
+      if (d.open) {
+        closingProgrammatically.current = true;
+        d.close();
+      }
     };
-  }, []);
+  }, [open]);
   return (
     <dialog
       ref={ref}
-      onClose={onClose}
+      onClose={() => {
+        if (closingProgrammatically.current) {
+          closingProgrammatically.current = false;
+          return;
+        }
+        // The browser closed it on its own (e.g. a close request that skipped `cancel`).
+        if (open) onClose();
+      }}
       onCancel={(e) => {
+        // Escape: let React state decide whether the dialog closes.
         e.preventDefault();
         onClose();
       }}
+      onPointerDown={(e) => {
+        pressedOnBackdrop.current = e.target === ref.current;
+      }}
       onClick={(e) => {
-        if (e.target === ref.current) onClose();
+        // Only a press that starts and ends on the backdrop dismisses (not a text selection drag).
+        if (pressedOnBackdrop.current && e.target === ref.current) onClose();
+        pressedOnBackdrop.current = false;
       }}
       aria-label={title}
       className={cx(

@@ -25,9 +25,9 @@ type Row = {
   expanded: boolean;
 };
 
-const EXAMPLE = `I have a dark brown, almost charcoal blazer, relaxed fit, suitable for dark academia and smart-casual outfits.
-A cream cable-knit wool jumper, navy chinos and brown suede chelsea boots.
-Black Dr Martens and a grey herringbone overcoat.`;
+const EXAMPLE = `Black Nike polyester shorts for the gym and a grey cotton hoodie.
+A green floral midi dress, white leather sneakers and a black waterproof rain jacket.
+High-waisted mid-blue straight jeans and a navy wool blazer for work.`
 
 export function ImportFlow({ initialTab, ai, care }: { initialTab: "text" | "csv"; ai: { enabled: boolean; reason: string | null }; care: Record<Category, CareDefault> }) {
   const router = useRouter();

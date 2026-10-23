@@ -98,7 +98,7 @@ export function StylistPanel({ garments, today, ai }: { garments: GarmentLite[];
             className="input min-h-20 font-serif text-base"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder="e.g. Seminar in the morning, then drinks with friends – something smart but not stiff, and use my tweed blazer."
+            placeholder="e.g. Gym in the morning, then work and dinner with friends – comfortable, and use my black Nike shorts for the gym."
           />
           <div className="flex flex-wrap gap-1.5">
             {OCCASIONS.map((o) => (

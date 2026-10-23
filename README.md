@@ -2,13 +2,14 @@
 
 A personal fashion journal and AI stylist that plans outfits **only from clothes you actually own** – around the weather, your plans, your laundry and your taste.
 
-- **Describe your wardrobe in plain English.** “A dark brown, almost charcoal blazer, relaxed fit, for dark academia and smart-casual outfits” becomes a structured garment record. Several garments in one paragraph become several records. You review, correct, de-duplicate and approve everything before it's saved.
-- **Every garment is drawn.** A local SVG illustration system draws each piece from its attributes – wide-leg vs slim trousers, overcoats vs blazers, chelsea boots vs loafers, lapels, collars, sleeves, lengths, patterns (plaid, herringbone, pinstripe…) and fabric textures (tweed, corduroy, denim, knit…). Outfits are shown as clothing boards.
+- **Describe your wardrobe in plain English.** “Black Nike polyester shorts for the gym” becomes a structured garment record (athletic shorts · Nike · polyester · black). Classification is factual – it records what the garment is, in your words, and never assigns a style you didn't mention. Several garments in one paragraph become several records. You review, correct, de-duplicate and approve everything before it's saved.
+- **Every garment is drawn.** A local SVG illustration system draws each piece from its attributes – wide-leg vs slim trousers, leggings and track pants, rain jackets vs blazers, sneakers vs boots vs loafers, lapels, collars, sleeves, lengths, patterns (plaid, herringbone, pinstripe…) and fabric textures (tweed, corduroy, denim, knit…). Outfits are shown as clothing boards.
 - **A stylist that can't make things up.** Claude suggests outfits, plans weeks, swaps single pieces and adjusts looks (smarter, warmer, more comfortable…). The app – not the model – enforces the rules: every garment must exist and be available, outfits must be complete (one pair of shoes, a bottom, something on the torso…), and your exclusions and “never combine” rules hold. Invalid ideas are discarded, Claude gets one chance to repair them, and the rest is filled by the rule-based stylist.
 - **Works fully without an API key.** A deterministic rule-based stylist (clearly labelled “Rule-based”), offline text/CSV import, the planner, laundry, illustrations, history and backups all work with no paid services.
 - **Weather and plans shape the outfit.** Open-Meteo forecasts (morning / afternoon / evening, apparent temperature, rain, wind) drive layers, outerwear and shoes. Add activities with times, dress codes and indoor/outdoor settings – or just describe your day.
 - **Laundry that matches real life.** Clean, worn, in the wash, drying, needs ironing, needs repair, packed, unavailable, retired. Marking an outfit worn applies per-category (and per-garment) wash-after-N-wears rules – a t-shirt goes to the wash, an overcoat doesn't.
 - **A weekly planner** with locking, single-day regeneration, saved-outfit reuse, manual weather overrides and flags when a planned garment becomes unavailable (you choose the replacement – nothing changes silently).
+- **A universal stylist, not a house style.** Nothing in the app assumes a look: the default profile is empty, the sample wardrobe carries no style tags, and both stylists work toward *your* stated taste – sportswear, streetwear, tailoring, boho, anything – or, if you haven't stated one, simply toward weather, plans and what goes together.
 - **Personalisation you can see**: a style profile in your own words, preferences, enforced rules, and feedback (love it, not my style, too warm, too formal, don't combine these again) with permanent / 30-day / one-off scopes. Plus an optional wardrobe-gap analysis grounded in what you own.
 
 Everything is stored in a local SQLite database. Nothing leaves your machine except weather lookups (coordinates only) and, if you enable it, requests to the Anthropic API.
@@ -36,7 +37,9 @@ cp .env.example .env.local
 # then set ANTHROPIC_API_KEY=… in .env.local and restart
 ```
 
-Settings → *Claude stylist* shows the status and has a **Test connection** button. You can switch Claude off there at any time.
+Settings → *Claude stylist* shows the status and has a **Test connection** button, which runs a real garment extraction and shows the API's exact answer. You can switch Claude off there at any time.
+
+When a Claude request fails, the notice says *what* failed – e.g. “the Anthropic API rejected the request [400, invalid_request_error]: … (request req_…)”, “the Anthropic API key was rejected”, “Claude's answer was cut off”, or, only for genuine refusals, “Claude declined this request [category: …]” – and the server log has the same line prefixed with `[ai]`. The offline fallback then runs as usual.
 
 ### Weather (optional)
 
@@ -77,9 +80,9 @@ All settings are optional – see [`.env.example`](.env.example).
 ### How suggestions are made
 
 1. The server builds a context: available garments, the day's weather (for the hours you're out), activities and dress codes, your profile, active rules, recent feedback, and recently worn or planned outfits.
-2. If Claude is enabled, it receives that context and returns outfits as **structured output** (validated with Zod by the SDK and again by the app).
+2. If Claude is enabled, it receives that context and returns outfits as **structured output** (`output_config.format` with a JSON schema; the reply is then validated with Zod and the hard constraints below). Schemas are kept within the API's documented limits (≤16 union-typed and ≤24 optional parameters) by using `""`, `"unspecified"` and `0` for unknown values instead of nullable fields – a test checks every schema.
 3. Each outfit is checked against hard constraints: garments exist, are available, appear once, form a complete outfit, include required pieces, avoid excluded pieces, and respect “never combine” / “avoid” rules. For week plans, pieces that would need washing before they're due are also rejected.
-4. Failures trigger one repair attempt with the specific errors; anything still invalid is replaced by the rule-based stylist. Rate limits, network errors, refusals, malformed output and missing credentials all fall back the same way, with a notice explaining why.
+4. Failures trigger one repair attempt with the specific errors; anything still invalid is replaced by the rule-based stylist. Rate limits, rejected requests, network errors, refusals, truncated or malformed output and missing credentials all fall back the same way, with a notice that names the actual cause.
 5. The rule-based stylist searches combinations and scores them on formality, warmth vs. the forecast, rain/wind suitability, season, colour harmony, pattern balance, your preferences, rotation (resting recently worn pieces), feedback and repetition. It's deterministic.
 
 Personalisation comes from stored preferences, rules, feedback and history – no model is trained.
@@ -118,7 +121,7 @@ npm run dev          # dev server on 127.0.0.1:3000
 npm run lint         # ESLint (next/core-web-vitals + TypeScript)
 npm run typecheck    # route types + tsc
 npm test             # Vitest unit/integration tests (in-memory SQLite, no network, AI mocked)
-npm run test:e2e     # production build + Playwright end-to-end journey (temporary DB, Claude disabled)
+npm run test:e2e     # production build + Playwright journey; dialog tests also run against `next dev` (StrictMode). Temporary DBs, Claude disabled
 npm run db:generate  # create a migration after changing src/server/db/schema.ts
 ```
 
@@ -149,7 +152,7 @@ Stack: Next.js 16 (App Router, Cache Components), React 19, TypeScript, Tailwind
 ## Known limitations
 
 - **No AI image generation.** All visuals are the local SVG illustrations (plus your own photos). They're stylised drawings, not photorealistic renders.
-- **Without Claude**, free-text understanding is keyword-based: the offline import parser recognises common garment, colour, material, fit and pattern words; the stylist reads occasion and “use / avoid my …” phrases from requests but not nuanced instructions. Free-text outfit adjustments (“swap in something burgundy”) need Claude; the quick adjustments work without it.
+- **Without Claude**, free-text understanding is keyword-based: the offline import parser recognises common garment, colour, material, fit and pattern words; the stylist reads occasion and “use / avoid my …” phrases from requests but not nuanced instructions. Free-text outfit adjustments (“something warmer, keep the shoes”) need Claude; the quick adjustments work without it.
 - The Claude integration is covered by tests with a mocked SDK client; it was not exercised against the live API while building this (no key was available).
 - Weather periods use the location's local time (morning 7–11, afternoon 12–17, evening 18–22). Weather overrides are entered in °C and km/h.
 - Single user, no accounts or sync; one wardrobe per database file.

@@ -2,7 +2,9 @@ import "server-only";
 import { isNeutral } from "@/lib/colours";
 import { slotFor } from "@/lib/domain";
 import type { Garment } from "@/server/db/schema";
-import { AiUnavailableError, REASON_TEXT, aiStatus } from "@/server/ai/client";
+import { AiUnavailableError, REASON_TEXT, aiStatus, describeAiError } from "@/server/ai/client";
+
+const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 import { aiGapAnalysis } from "@/server/ai/tasks";
 import { getProfile } from "@/server/services/preferences";
 import type { Profile } from "@/lib/schemas";
@@ -20,23 +22,29 @@ function pick(gs: Garment[], pred: (g: Garment) => boolean, n = 5) {
     .map((g) => ({ id: g.id, name: g.name }));
 }
 
-/** Simple coverage checks over the actual wardrobe. Only reports gaps the wardrobe really has. */
+/**
+ * Coverage checks over the actual wardrobe. Each gap is grounded in what the person owns (or
+ * their own stated preferences) – never in a particular aesthetic – and names the garments it
+ * would work with.
+ */
 export function ruleGaps(gs: Garment[], profile: Profile): Gap[] {
   const gaps: Gap[] = [];
+  if (gs.length < 6) return [];
   const by = (slots: string[]) => gs.filter((g) => slots.includes(slotFor(g)));
   const tops = by(["top"]);
   const lowers = by(["bottom", "onepiece", "suit"]);
   const outers = by(["outer"]);
   const shoes = by(["footwear"]);
-  const mids = by(["mid"]);
-  const tailoringFan = profile.formality >= 3 || profile.aesthetics.some((a) => /academia|classic|menswear|ivy|preppy|smart/.test(a));
-  if (gs.length < 6) return [];
+  const smartPieces = gs.filter((g) => g.formality >= 4 && slotFor(g) !== "footwear" && slotFor(g) !== "accessory");
+  const casualPieces = gs.filter((g) => g.formality <= 2 && slotFor(g) !== "footwear" && slotFor(g) !== "accessory");
+  const wantsTailoring =
+    (profile.formality ?? 0) >= 4 || profile.aesthetics.some((a) => /tailor|classic|academia|menswear|preppy|business|smart|formal/.test(a));
 
-  if (!outers.some((g) => g.weather.includes("waterproof") || g.weather.includes("water-resistant") || /trench|mac|rain|parka|wax/.test(t(g)))) {
+  if (!gs.some((g) => (slotFor(g) === "outer" || slotFor(g) === "mid") && (g.weather.includes("waterproof") || g.weather.includes("water-resistant") || /rain|trench|mac|parka|anorak|shell|wax/.test(t(g))))) {
     gaps.push({
-      piece: outers.length ? "A water-resistant coat (a trench or waxed jacket in a neutral)" : "A versatile coat",
-      why: outers.length ? "None of your coats are marked rain-ready, so wet days limit your outerwear." : "You have no outerwear, so cold or wet days have no answer.",
-      pairsWith: pick(gs, (g) => ["top", "mid", "bottom"].includes(slotFor(g))),
+      piece: "A rain-ready outer layer (for example a rain jacket, trench or parka)",
+      why: outers.length ? "None of your outerwear is marked waterproof or water-resistant, so wet days have no good option." : "You have no outerwear yet, so cold or wet days have no answer.",
+      pairsWith: pick(gs, (g) => ["top", "mid", "bottom", "onepiece"].includes(slotFor(g))),
       priority: "high",
       source: "rules",
     });
@@ -44,35 +52,35 @@ export function ruleGaps(gs: Garment[], profile: Profile): Gap[] {
   const neutralLowers = lowers.filter((g) => g.colours[0] && isNeutral(g.colours[0].hex));
   if (lowers.length && neutralLowers.length < 2) {
     gaps.push({
-      piece: "Neutral trousers (navy, grey, charcoal or stone)",
-      why: `Only ${neutralLowers.length} of your bottoms are neutral, which makes your tops and jackets harder to combine.`,
+      piece: "Bottoms in a neutral colour",
+      why: `Only ${neutralLowers.length} of your bottoms ${neutralLowers.length === 1 ? "is" : "are"} a neutral colour, which makes your tops harder to combine.`,
       pairsWith: pick(gs, (g) => ["top", "mid", "outer"].includes(slotFor(g))),
       priority: "high",
       source: "rules",
     });
   }
-  if (!shoes.some((g) => g.formality >= 4)) {
+  if (smartPieces.length >= 2 && !shoes.some((g) => g.formality >= 4)) {
     gaps.push({
-      piece: "Smart leather shoes (dark brown derbies or loafers)",
-      why: "No footwear in your wardrobe is formal enough for presentations, interviews or dinners.",
-      pairsWith: pick(gs, (g) => g.formality >= 3 && slotFor(g) !== "footwear"),
-      priority: tailoringFan ? "high" : "medium",
-      source: "rules",
-    });
-  }
-  if (!shoes.some((g) => /sneaker|trainer|canvas/.test(t(g)))) {
-    gaps.push({
-      piece: "Clean, minimal sneakers",
-      why: "There's no relaxed shoe for casual days, so casual outfits lean on boots or dress shoes.",
-      pairsWith: pick(gs, (g) => g.formality <= 3 && slotFor(g) !== "footwear"),
+      piece: "Shoes that match your smarter pieces",
+      why: `You own ${smartPieces.length} smart pieces but no footwear as formal as them.`,
+      pairsWith: pick(smartPieces, () => true),
       priority: "medium",
       source: "rules",
     });
   }
-  if (!shoes.some((g) => /boot/.test(t(g)))) {
+  if (casualPieces.length >= 3 && !shoes.some((g) => g.formality <= 2)) {
     gaps.push({
-      piece: "A pair of leather or suede boots",
-      why: "Without boots, cold or rainy days have no sturdy footwear option.",
+      piece: "Everyday casual shoes (for example sneakers or trainers)",
+      why: "Your casual pieces have no relaxed shoes to go with them.",
+      pairsWith: pick(casualPieces, () => true),
+      priority: "medium",
+      source: "rules",
+    });
+  }
+  if (shoes.length && !shoes.some((g) => /boot/.test(t(g)) || g.weather.includes("waterproof") || g.weather.includes("water-resistant"))) {
+    gaps.push({
+      piece: "Footwear for wet or cold days",
+      why: "None of your shoes are boots or marked water-resistant.",
       pairsWith: pick(gs, (g) => ["bottom", "outer"].includes(slotFor(g))),
       priority: "medium",
       source: "rules",
@@ -80,37 +88,28 @@ export function ruleGaps(gs: Garment[], profile: Profile): Gap[] {
   }
   if (tops.length < 4) {
     gaps.push({
-      piece: "More base layers (plain tees or oxford shirts in white, ecru or light blue)",
+      piece: "More everyday tops",
       why: `You have ${tops.length} base top${tops.length === 1 ? "" : "s"}; these need washing most often, so the week runs out quickly.`,
       pairsWith: pick(gs, (g) => ["bottom", "mid", "outer"].includes(slotFor(g))),
       priority: "high",
       source: "rules",
     });
   }
-  if (!mids.some((g) => g.category === "knitwear" && g.colours[0] && isNeutral(g.colours[0].hex))) {
+  if (!gs.some((g) => slotFor(g) === "mid" && g.warmth >= 2 && g.category !== "outerwear")) {
     gaps.push({
-      piece: "A neutral knit (navy, oatmeal or grey crewneck)",
-      why: "A neutral jumper is the easiest mid layer for cool days and works over almost every shirt you own.",
+      piece: "A warm mid layer (for example a jumper, sweatshirt, cardigan or fleece)",
+      why: "There's nothing to layer between a top and a coat on cool days.",
       pairsWith: pick(gs, (g) => ["top", "bottom"].includes(slotFor(g))),
       priority: "medium",
       source: "rules",
     });
   }
-  if (tailoringFan && !gs.some((g) => /blazer|sport coat|suit/.test(t(g)))) {
+  if (wantsTailoring && !gs.some((g) => /blazer|sport coat|suit/.test(t(g)))) {
     gaps.push({
-      piece: "An unstructured blazer in a muted colour",
-      why: "Your style leans tailored, but there's no jacket to sharpen an outfit for seminars, dinners or presentations.",
+      piece: "A blazer or tailored jacket",
+      why: "Your profile leans tailored, but there's no jacket to sharpen an outfit.",
       pairsWith: pick(gs, (g) => ["top", "bottom", "mid"].includes(slotFor(g)) && g.formality >= 2),
       priority: "medium",
-      source: "rules",
-    });
-  }
-  if (lowers.some((g) => g.category === "trousers") && profile.formality >= 3 && !gs.some((g) => /belt/.test(t(g)))) {
-    gaps.push({
-      piece: "A leather belt matching your shoes",
-      why: "Trousers with belt loops look unfinished at smart-casual and above without one.",
-      pairsWith: pick(gs, (g) => g.category === "trousers"),
-      priority: "low",
       source: "rules",
     });
   }
@@ -140,9 +139,9 @@ export async function gapAnalysis(opts: { useAi?: boolean } = {}) {
           ),
         };
       } catch (err) {
-        notice = err instanceof AiUnavailableError ? `${REASON_TEXT[err.reason]} – showing the built-in checks.` : "Showing the built-in checks.";
+        notice = err instanceof AiUnavailableError ? `${capitalise(describeAiError(err))} – showing the built-in checks.` : "Showing the built-in checks.";
       }
-    } else notice = `${REASON_TEXT[status.reason!]} – showing the built-in checks.`;
+    } else notice = `${capitalise(REASON_TEXT[status.reason!])} – showing the built-in checks.`;
   }
   return { notice, gaps: ruleGaps(gs, profile) };
 }

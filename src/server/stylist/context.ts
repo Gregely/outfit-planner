@@ -13,6 +13,9 @@ import { outfitGarmentIds } from "@/server/services/outfits";
 import { eq } from "drizzle-orm";
 import type { EngineContext } from "./engine";
 
+/** With no occasion, dress code or stated preference: halfway between casual and smart casual. */
+export const NEUTRAL_FORMALITY = 2.5;
+
 export function seasonFor(date: string, latitude?: number | null): Season {
   const m = monthOf(date);
   const north: Season = m === 12 || m <= 2 ? "winter" : m <= 5 ? "spring" : m <= 8 ? "summer" : "autumn";
@@ -109,7 +112,7 @@ export async function buildContext(opts: ContextOptions): Promise<StylistContext
   const actText = day.activities.map((a) => `${a.title} ${a.notes ?? ""}`).join(" ");
   const fromActivityText = occasionFromText(actText);
   const base =
-    fromOccasion.formality ?? hints.formality ?? fromActivities ?? fromActivityText.formality ?? profile.formality;
+    fromOccasion.formality ?? hints.formality ?? fromActivities ?? fromActivityText.formality ?? profile.formality ?? NEUTRAL_FORMALITY;
   const targetFormality = Math.min(5, Math.max(1, base + hints.formalityDelta));
   const occasion = opts.occasion || fromOccasion.occasion || hints.occasion || (day.activities[0]?.title ?? null) || fromActivityText.occasion;
 

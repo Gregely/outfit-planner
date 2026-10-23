@@ -111,7 +111,9 @@ export function templateFor(input: IllustrationInput): Template {
       if (has(sub, "trench", "mac")) return "trench";
       if (has(sub, "pea", "reefer")) return "peacoat";
       if (has(sub, "puffer", "down", "quilted")) return "puffer";
-      if (has(sub, "parka", "anorak", "rain", "cagoule", "shell")) return "parka";
+      if (has(sub, "parka", "anorak", "rain", "cagoule", "shell", "windbreaker", "waterproof")) return "parka";
+      if (has(sub, "gilet", "body warmer", "bodywarmer")) return "puffer";
+      if (has(sub, "track jacket", "track top", "zip-up", "fleece")) return "harrington";
       if (has(sub, "bomber", "flight", "varsity")) return "bomber";
       if (has(sub, "denim", "trucker", "jean jacket")) return "denim-jacket";
       if (has(sub, "leather", "biker", "moto")) return "leather-jacket";
@@ -136,10 +138,11 @@ export function templateFor(input: IllustrationInput): Template {
     case "footwear":
       if (has(sub, "chelsea", "jodhpur")) return "chelsea";
       if (has(sub, "boot")) return "boot";
-      if (has(sub, "loafer", "boat", "moccasin", "slipper", "mule")) return "loafer";
-      if (has(sub, "sandal", "slide", "flip")) return "sandal";
-      if (has(sub, "sneaker", "trainer", "running", "canvas", "plimsoll", "tennis")) return "sneaker";
-      return "oxford";
+      if (has(sub, "sandal", "slide", "flip", "espadrille")) return "sandal";
+      if (has(sub, "sneaker", "trainer", "running", "canvas", "plimsoll", "tennis", "gym", "sport", "athletic", "basketball", "skate", "hiking shoe")) return "sneaker";
+      if (has(sub, "loafer", "boat", "moccasin", "slipper", "mule", "flat", "ballet", "heel", "pump", "court shoe", "mary jane", "stiletto", "kitten")) return "loafer";
+      if (has(sub, "oxford", "derby", "brogue", "dress shoe", "monk")) return "oxford";
+      return "sneaker";
     case "accessories":
       if (has(sub, "scarf", "muffler", "shawl")) return "scarf";
       if (has(sub, "beanie", "watch cap", "toque")) return "beanie";
@@ -954,9 +957,9 @@ function legShape(ctx: Ctx): keyof typeof LEG_SHAPES {
   if (/wide|palazzo|baggy|sailor/.test(s)) return "wide";
   if (/flare|bootcut|bell/.test(s)) return "flared";
   if (/barrel|balloon/.test(s)) return "barrel";
-  if (/skinny/.test(s)) return "skinny";
+  if (/skinny|legging|tights/.test(s)) return "skinny";
   if (/slim/.test(s)) return "slim";
-  if (/taper|jogger|carrot/.test(s)) return "tapered";
+  if (/taper|jogger|carrot|track ?pant|sweatpant/.test(s)) return "tapered";
   switch (ctx.fit) {
     case "skinny":
       return "skinny";
@@ -972,10 +975,15 @@ function legShape(ctx: Ctx): keyof typeof LEG_SHAPES {
   }
 }
 
+const SPORTY_LEGS = /jogger|athletic|sweat|running|gym|track|legging|tights|bike|cycling|sport|training|yoga|lounge|pyjama|swim/;
+
 function drawLegs(ctx: Ctx, opts: { kind: "trousers" | "jeans" | "shorts"; waistY?: number; hemY?: number; noWaist?: boolean }): Bounds {
   const cx = 100;
   const waistY = opts.waistY ?? 16;
   const shapeKey = opts.kind === "shorts" ? "straight" : legShape(ctx);
+  // pull-on sportswear and loungewear: elastic waist, no fly or belt loops
+  const elastic = SPORTY_LEGS.test(ctx.sub);
+  const sporty = elastic && !/sweat|lounge|pyjama|jogger/.test(ctx.sub);
   const s = LEG_SHAPES[shapeKey];
   const waistHalf = fitWidth(ctx.fit, 35);
   const hipHalf = waistHalf + 5;
@@ -1010,8 +1018,7 @@ function drawLegs(ctx: Ctx, opts: { kind: "trousers" | "jeans" | "shorts"; waist
   // waistband
   if (!opts.noWaist) {
     const wb = P([[cx - waistHalf, waistY], [cx + waistHalf, waistY], [cx + waistHalf + 0.6, waistY + 9], [cx - waistHalf - 0.6, waistY + 9]]);
-    const jogger = ctx.sub.includes("jogger") || ctx.sub.includes("athletic") || ctx.sub.includes("sweat");
-    if (jogger) {
+    if (elastic) {
       ribBand(ctx, cx - waistHalf, cx + waistHalf, waistY, 9);
       line(ctx, `M${n(cx - 4)} ${n(waistY + 8)}q-2 12 -6 16M${n(cx + 4)} ${n(waistY + 8)}q2 12 6 16`, { stroke: ctx.second, width: 1.3 });
     } else {
@@ -1025,11 +1032,18 @@ function drawLegs(ctx: Ctx, opts: { kind: "trousers" | "jeans" | "shorts"; waist
   }
   const jeans = opts.kind === "jeans" || ctx.texture === "denim";
   // fly
-  if (!(ctx.sub.includes("jogger") || ctx.sub.includes("athletic"))) {
+  if (!elastic) {
     const fly = `M${n(cx)} ${n(waistY + 9)}V${n(crotchY - 12)}Q${n(cx + 1)} ${n(crotchY - 6)} ${n(cx + 10)} ${n(crotchY - 20)}V${n(waistY + 9)}`;
     if (jeans) stitch(ctx, fly);
     else line(ctx, fly, { width: 1, opacity: 0.55 });
   }
+  if (sporty) {
+    // side stripe (track pants) or side split (running shorts)
+    const top = waistY + 12;
+    line(ctx, `M${n(cx + hipHalf - 1)} ${n(top)}L${n(cx + hemOuter - 1.5)} ${n(hemY - 1)}M${n(cx - hipHalf + 1)} ${n(top)}L${n(cx - hemOuter + 1.5)} ${n(hemY - 1)}`, { stroke: ctx.second, width: 2.2, opacity: 0.85 });
+    if (opts.kind === "shorts") line(ctx, `M${n(cx + hemOuter - 2)} ${n(hemY)}l-3 -9M${n(cx - hemOuter + 2)} ${n(hemY)}l3 -9`, { width: 1.1 });
+  }
+  if (/legging|tights|bike|cycling/.test(ctx.sub)) return [waistY - 2, hemY + 2];
   // front pockets
   const pocket = jeans
     ? `M${n(cx + waistHalf - 16)} ${n(waistY + 9)}Q${n(cx + waistHalf - 12)} ${n(waistY + 26)} ${n(cx + hipHalf - 1)} ${n(waistY + 28)}`

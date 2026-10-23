@@ -136,9 +136,9 @@ export function scoreOutfit(gs: Garment[], ctx: EngineContext): { score: number;
   const tee = gs.find((g) => g.category === "tops" && /t-shirt|tee|tank/.test(text(g)));
   if (hasSuitOrBlazer && tee && ctx.targetFormality >= 3.8) score -= 1.5;
   if (gs.some((g) => slotFor(g) === "suit") && gs.some((g) => g.category === "shirts")) score += 0.8;
-  // a roll neck is worn on its own or under tailoring, never over a collared shirt
+  // a roll neck over a collared shirt bunches at the neck – a practical clash, so only a mild penalty
   const turtleneck = gs.some((g) => /turtle|roll ?neck|polo neck/.test(text(g)));
-  if (turtleneck && gs.some((g) => slotFor(g) === "top")) score -= 3;
+  if (turtleneck && gs.some((g) => slotFor(g) === "top" && g.category === "shirts")) score -= 1.2;
   // shorts don't go with heavy layers
   const shorts = gs.some((g) => g.category === "shorts");
   if (shorts && gs.some((g) => g.warmth >= 4 && ["mid", "outer"].includes(slotFor(g)))) score -= 3;
@@ -170,9 +170,10 @@ export function scoreOutfit(gs: Garment[], ctx: EngineContext): { score: number;
   // colour & pattern
   const hexes = gs.filter((g) => slotFor(g) !== "accessory").flatMap((g) => g.colours.slice(0, 1).map((c) => c.hex));
   const harmony = harmonyScore(hexes);
-  score += (harmony - 1) * 4;
-  const bold = gs.filter((g) => BOLD_PATTERNS.has(g.pattern) && slotFor(g) !== "accessory").length;
   const boldness = ctx.profile.boldness;
+  // colour clashes matter less to someone who has said they like bold looks
+  score += (harmony - 1) * (boldness >= 4 ? 1.5 : boldness === 3 ? 3 : 4);
+  const bold = gs.filter((g) => BOLD_PATTERNS.has(g.pattern) && slotFor(g) !== "accessory").length;
   if (bold > 1) score -= (bold - 1) * (boldness >= 4 ? 0.6 : 1.6);
   const accents = hexes.filter((h) => !isNeutral(h)).length;
   if (boldness <= 2 && accents > 1) score -= (accents - 1) * 0.5;

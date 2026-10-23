@@ -29,30 +29,30 @@ export function ProfileForm({ profile }: { profile: Profile }) {
           className="input min-h-28 font-serif text-base leading-relaxed"
           value={p.styleDescription}
           onChange={(e) => set("styleDescription", e.target.value)}
-          placeholder="Mostly dark academia and classic menswear with a grunge streak – tweed, wool, knitwear, boots. Earthy colours, nothing shiny. I like relaxed trousers with a neater top half."
+          placeholder="However you'd describe it – the looks you like, colours you reach for, what you need clothes to do. Leave it blank if you'd rather the stylist just work from your wardrobe."
         />
       </Field>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Aesthetics">
-          <TagInput label="Aesthetics" value={p.aesthetics} onChange={(v) => set("aesthetics", v)} suggestions={SUGGESTED_STYLE_TAGS} placeholder="dark academia, grunge…" />
+          <TagInput label="Aesthetics" value={p.aesthetics} onChange={(v) => set("aesthetics", v)} suggestions={SUGGESTED_STYLE_TAGS} placeholder="any style words you use…" />
         </Field>
         <Field label="Preferred fits">
           <TagInput label="Preferred fits" value={p.preferredFits} onChange={(v) => set("preferredFits", v)} suggestions={[...FITS]} placeholder="relaxed, tailored…" />
         </Field>
         <Field label="Favourite colours">
-          <TagInput label="Favourite colours" value={p.favouriteColours} onChange={(v) => set("favouriteColours", v)} placeholder="burgundy, forest green…" />
+          <TagInput label="Favourite colours" value={p.favouriteColours} onChange={(v) => set("favouriteColours", v)} placeholder="any colours…" />
         </Field>
         <Field label="Colours you'd rather avoid" hint="A preference. For a hard rule, add an “avoid colour” rule below.">
-          <TagInput label="Avoided colours" value={p.avoidedColours} onChange={(v) => set("avoidedColours", v)} placeholder="neon, pastel pink…" />
+          <TagInput label="Avoided colours" value={p.avoidedColours} onChange={(v) => set("avoidedColours", v)} placeholder="any colours…" />
         </Field>
         <Field label="Silhouettes you like">
-          <TagInput label="Silhouettes" value={p.preferredSilhouettes} onChange={(v) => set("preferredSilhouettes", v)} placeholder="wide-leg, cropped jacket…" />
+          <TagInput label="Silhouettes" value={p.preferredSilhouettes} onChange={(v) => set("preferredSilhouettes", v)} placeholder="any shapes or cuts…" />
         </Field>
         <Field label="Favourite materials">
-          <TagInput label="Favourite materials" value={p.favouriteMaterials} onChange={(v) => set("favouriteMaterials", v)} placeholder="wool, corduroy…" />
+          <TagInput label="Favourite materials" value={p.favouriteMaterials} onChange={(v) => set("favouriteMaterials", v)} placeholder="any materials…" />
         </Field>
         <Field label="Materials to avoid">
-          <TagInput label="Materials to avoid" value={p.avoidedMaterials} onChange={(v) => set("avoidedMaterials", v)} placeholder="polyester…" />
+          <TagInput label="Materials to avoid" value={p.avoidedMaterials} onChange={(v) => set("avoidedMaterials", v)} placeholder="any materials…" />
         </Field>
         <Field label="Layering">
           <select className="input" value={p.layering} onChange={(e) => set("layering", e.target.value as Profile["layering"])}>
@@ -61,8 +61,15 @@ export function ProfileForm({ profile }: { profile: Profile }) {
             <option value="love-layers">Love layers</option>
           </select>
         </Field>
-        <Field label={`Usual formality · ${p.formality}/5`}>
-          <Scale label="Usual formality" value={p.formality} onChange={(v) => set("formality", v)} labels={{ 1: "Lounge", 2: "Casual", 3: "Smart casual", 4: "Business", 5: "Formal" }} />
+        <Field label={`Usual formality · ${p.formality === null ? "no preference" : `${p.formality}/5`}`} hint="Leave unset to let each day's plans decide.">
+          <div className="flex items-center gap-2">
+            <div className="flex-1">
+              <Scale label="Usual formality" value={p.formality ?? 0} onChange={(v) => set("formality", v)} labels={{ 1: "Lounge / active", 2: "Casual", 3: "Smart casual", 4: "Business", 5: "Formal" }} />
+            </div>
+            <button type="button" className="text-xs text-muted underline-offset-2 hover:underline disabled:no-underline disabled:opacity-50" disabled={p.formality === null} onClick={() => set("formality", null)}>
+              No preference
+            </button>
+          </div>
         </Field>
         <Field label={`Comfort priority · ${p.comfortPriority}/5`}>
           <Scale label="Comfort priority" value={p.comfortPriority} onChange={(v) => set("comfortPriority", v)} labels={{ 1: "Look first", 2: "", 3: "Balanced", 4: "", 5: "Comfort first" }} />
@@ -80,7 +87,7 @@ export function ProfileForm({ profile }: { profile: Profile }) {
         </div>
       </div>
       <Field label="Anything else">
-        <textarea className="input min-h-16" value={p.notes} onChange={(e) => set("notes", e.target.value)} placeholder="I cycle to campus most days; my office is cold." />
+        <textarea className="input min-h-16" value={p.notes} onChange={(e) => set("notes", e.target.value)} placeholder="e.g. I cycle most days; my workplace is cold; I need to move freely." />
       </Field>
       <div className="flex justify-end">
         <Button type="submit" variant="primary" busy={pending === "save"}>
@@ -210,7 +217,7 @@ function RuleDialog({ open, onClose, garments }: { open: boolean; onClose: () =>
         ) : null}
         {kind === "note" ? (
           <Field label="Rule" hint="Passed to Claude as a standing instruction (the rule-based stylist can't read free text).">
-            <input className="input" value={text} onChange={(e) => setText(e.target.value)} placeholder="Always pair the tweed blazer with boots, not trainers." />
+            <input className="input" value={text} onChange={(e) => setText(e.target.value)} placeholder="e.g. Always wear the waterproof jacket when cycling." />
           </Field>
         ) : null}
         {kind === "prefer_garment" ? <Notice tone="info">A nudge rather than a hard rule: these pieces are favoured when they suit the day.</Notice> : null}

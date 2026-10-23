@@ -120,9 +120,10 @@ export const profileSchema = z.object({
   favouriteMaterials: tagList(12).default([]),
   avoidedMaterials: tagList(12).default([]),
   layering: z.enum(["minimal", "moderate", "love-layers"]).default("moderate"),
-  formality: z.number().int().min(1).max(5).default(3),
+  /** null = no usual formality; activities and occasions decide */
+  formality: z.number().int().min(1).max(5).nullable().default(null),
   comfortPriority: z.number().int().min(1).max(5).default(3),
-  boldness: z.number().int().min(1).max(5).default(2),
+  boldness: z.number().int().min(1).max(5).default(3),
   repetitionDays: z.number().int().min(0).max(60).default(10),
   garmentRestDays: z.number().int().min(0).max(14).default(2),
   notes: trimmed(2000).default(""),

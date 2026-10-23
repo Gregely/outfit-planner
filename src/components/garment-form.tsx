@@ -307,7 +307,7 @@ export function GarmentFields({
     <div className="space-y-5">
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Name" className="sm:col-span-2">
-          <input className="input" required value={d.name} onChange={(e) => set("name", e.target.value)} placeholder="Dark brown tweed blazer" />
+          <input className="input" required value={d.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Black running shorts" />
         </Field>
         <Field label="Category">
           <Select label="Category" value={d.category} onChange={(v) => set("category", v as Category)} options={CATEGORIES.map((c) => ({ value: c, label: CATEGORY_LABELS[c] }))} />
@@ -340,7 +340,7 @@ export function GarmentFields({
           </Field>
         </div>
         <Field label="Materials" className={hl("materials")}>
-          <TagInput label="Materials" value={d.materials} onChange={(v) => set("materials", v)} suggestions={["wool", "cotton", "linen", "denim", "corduroy", "leather", "suede", "cashmere", "tweed", "silk"]} placeholder="wool, cotton…" />
+          <TagInput label="Materials" value={d.materials} onChange={(v) => set("materials", v)} suggestions={["cotton", "polyester", "wool", "denim", "linen", "nylon", "elastane", "leather", "silk", "viscose", "fleece", "cashmere"]} placeholder="wool, cotton…" />
         </Field>
       </Group>
 
@@ -378,7 +378,7 @@ export function GarmentFields({
             <TagInput label="Occasions" value={d.occasions} onChange={(v) => set("occasions", v)} suggestions={SUGGESTED_OCCASIONS} placeholder="college, date…" />
           </Field>
           <Field label="Style tags">
-            <TagInput label="Style tags" value={d.styleTags} onChange={(v) => set("styleTags", v)} suggestions={SUGGESTED_STYLE_TAGS} placeholder="dark academia…" />
+            <TagInput label="Style tags" value={d.styleTags} onChange={(v) => set("styleTags", v)} suggestions={SUGGESTED_STYLE_TAGS} placeholder="your own words…" />
           </Field>
         </div>
       </Group>

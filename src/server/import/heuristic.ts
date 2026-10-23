@@ -1,42 +1,57 @@
 /**
- * Offline garment parser. Recognises garment words, colours, materials, fits, patterns and
- * style words in free text. It never guesses beyond what the text says; anything it
- * can't find is left at a neutral default and flagged for review.
+ * Offline garment parser. Recognises garment types, colours, materials, fits, patterns, brands
+ * and style words in free text. Classification is factual: a generic noun stays generic
+ * ("shorts" → shorts) and is only refined by words actually in the description ("Nike" or
+ * "running" → athletic shorts, "chino" → chino shorts). Nothing is assumed from any aesthetic;
+ * anything not stated is left neutral or estimated from the garment type and flagged.
  */
-import { defaultLayeringRole, type Category, type Fit, type Pattern, type Season } from "@/lib/domain";
+import { defaultLayeringRole, type Category, type Fit, type GarmentDetails, type Pattern, type Season } from "@/lib/domain";
 import { NAMED_COLOURS, toColour, type Colour } from "@/lib/colours";
+import { detectBrand, estimateTraits, isAthletic } from "@/lib/garment-traits";
 import type { GarmentInput } from "@/lib/schemas";
 
 type Hit = { category: Category; subcategory: string; index: number; word: string };
 
-/** keyword → [category, subcategory] (longest keywords are matched first) */
+/**
+ * keyword → [category, subcategory]. Longest keywords match first. Generic nouns map to the
+ * generic type; specific entries only fire when the text names that type.
+ */
 const KEYWORDS: [string, Category, string][] = [
+  // tops
   ["t-shirt", "tops", "t-shirt"],
   ["tshirt", "tops", "t-shirt"],
   ["tee", "tops", "t-shirt"],
   ["long-sleeve tee", "tops", "long-sleeve tee"],
-  ["long sleeve tee", "tops", "long-sleeve tee"],
+  ["long sleeve top", "tops", "long-sleeve top"],
   ["polo shirt", "tops", "polo"],
   ["polo", "tops", "polo"],
   ["henley", "tops", "henley"],
   ["tank top", "tops", "tank top"],
   ["vest top", "tops", "tank top"],
+  ["camisole", "tops", "camisole"],
+  ["crop top", "tops", "crop top"],
+  ["sports bra", "tops", "sports bra"],
+  ["bodysuit", "tops", "bodysuit"],
+  ["top", "tops", "top"],
   ["sweatshirt", "tops", "sweatshirt"],
   ["hoodie", "tops", "hoodie"],
   ["rugby shirt", "tops", "rugby shirt"],
+  // shirts
   ["oxford shirt", "shirts", "oxford shirt"],
   ["dress shirt", "shirts", "dress shirt"],
   ["flannel shirt", "shirts", "flannel shirt"],
-  ["flannel", "shirts", "flannel shirt"],
   ["overshirt", "shirts", "overshirt"],
   ["shacket", "shirts", "overshirt"],
   ["camp collar shirt", "shirts", "camp-collar shirt"],
-  ["camp-collar shirt", "shirts", "camp-collar shirt"],
+  ["hawaiian shirt", "shirts", "camp-collar shirt"],
   ["denim shirt", "shirts", "denim shirt"],
   ["linen shirt", "shirts", "linen shirt"],
   ["grandad shirt", "shirts", "band-collar shirt"],
-  ["shirt", "shirts", "oxford shirt"],
-  ["blouse", "shirts", "dress shirt"],
+  ["button-down", "shirts", "button-down shirt"],
+  ["button-up", "shirts", "button-up shirt"],
+  ["shirt", "shirts", "shirt"],
+  ["blouse", "shirts", "blouse"],
+  // knitwear
   ["turtleneck", "knitwear", "turtleneck"],
   ["roll neck", "knitwear", "turtleneck"],
   ["rollneck", "knitwear", "turtleneck"],
@@ -47,12 +62,10 @@ const KEYWORDS: [string, Category, string][] = [
   ["slipover", "knitwear", "sweater vest"],
   ["quarter-zip", "knitwear", "quarter-zip"],
   ["quarter zip", "knitwear", "quarter-zip"],
-  ["cable knit", "knitwear", "cable knit"],
-  ["v-neck jumper", "knitwear", "v-neck jumper"],
-  ["v-neck sweater", "knitwear", "v-neck jumper"],
-  ["jumper", "knitwear", "crewneck jumper"],
-  ["sweater", "knitwear", "crewneck jumper"],
-  ["pullover", "knitwear", "crewneck jumper"],
+  ["jumper", "knitwear", "jumper"],
+  ["sweater", "knitwear", "sweater"],
+  ["pullover", "knitwear", "pullover"],
+  // trousers
   ["jeans", "trousers", "jeans"],
   ["chinos", "trousers", "chinos"],
   ["corduroys", "trousers", "corduroys"],
@@ -61,29 +74,34 @@ const KEYWORDS: [string, Category, string][] = [
   ["cargo pants", "trousers", "cargo trousers"],
   ["cargos", "trousers", "cargo trousers"],
   ["joggers", "trousers", "joggers"],
-  ["sweatpants", "trousers", "joggers"],
-  ["pleated trousers", "trousers", "pleated trousers"],
-  ["wool trousers", "trousers", "wool trousers"],
-  ["linen trousers", "trousers", "linen trousers"],
-  ["trousers", "trousers", "wool trousers"],
-  ["slacks", "trousers", "wool trousers"],
-  ["pants", "trousers", "chinos"],
-  ["shorts", "shorts", "chino shorts"],
-  ["skirt", "skirts", "a-line skirt"],
-  ["dress", "dresses", "midi dress"],
+  ["sweatpants", "trousers", "sweatpants"],
+  ["track pants", "trousers", "track pants"],
+  ["tracksuit bottoms", "trousers", "track pants"],
+  ["leggings", "trousers", "leggings"],
+  ["trousers", "trousers", "trousers"],
+  ["slacks", "trousers", "trousers"],
+  ["pants", "trousers", "trousers"],
+  // shorts, skirts, dresses
+  ["shorts", "shorts", "shorts"],
+  ["skort", "skirts", "skort"],
+  ["skirt", "skirts", "skirt"],
+  ["jumpsuit", "dresses", "jumpsuit"],
+  ["playsuit", "dresses", "playsuit"],
+  ["romper", "dresses", "playsuit"],
+  ["dress", "dresses", "dress"],
+  // outerwear
   ["blazer", "outerwear", "blazer"],
   ["sport coat", "outerwear", "sport coat"],
   ["sports jacket", "outerwear", "sport coat"],
-  ["tweed jacket", "outerwear", "sport coat"],
   ["overcoat", "outerwear", "overcoat"],
   ["topcoat", "outerwear", "overcoat"],
   ["trench coat", "outerwear", "trench coat"],
   ["trench", "outerwear", "trench coat"],
-  ["mac", "outerwear", "raincoat"],
   ["raincoat", "outerwear", "raincoat"],
+  ["rain jacket", "outerwear", "rain jacket"],
   ["peacoat", "outerwear", "peacoat"],
   ["pea coat", "outerwear", "peacoat"],
-  ["duffle coat", "outerwear", "overcoat"],
+  ["duffle coat", "outerwear", "duffle coat"],
   ["bomber", "outerwear", "bomber jacket"],
   ["denim jacket", "outerwear", "denim jacket"],
   ["jean jacket", "outerwear", "denim jacket"],
@@ -93,95 +111,157 @@ const KEYWORDS: [string, Category, string][] = [
   ["field jacket", "outerwear", "field jacket"],
   ["chore coat", "outerwear", "chore coat"],
   ["chore jacket", "outerwear", "chore coat"],
-  ["work jacket", "outerwear", "chore coat"],
-  ["barn jacket", "outerwear", "field jacket"],
+  ["track jacket", "outerwear", "track jacket"],
+  ["tracksuit top", "outerwear", "track jacket"],
+  ["windbreaker", "outerwear", "windbreaker"],
   ["harrington", "outerwear", "harrington jacket"],
   ["parka", "outerwear", "parka"],
-  ["anorak", "outerwear", "parka"],
+  ["anorak", "outerwear", "anorak"],
   ["puffer", "outerwear", "puffer jacket"],
   ["down jacket", "outerwear", "puffer jacket"],
-  ["coat", "outerwear", "overcoat"],
-  ["jacket", "outerwear", "field jacket"],
+  ["gilet", "outerwear", "gilet"],
+  ["body warmer", "outerwear", "gilet"],
+  ["fleece jacket", "outerwear", "fleece jacket"],
+  ["coat", "outerwear", "coat"],
+  ["jacket", "outerwear", "jacket"],
+  // footwear
   ["chelsea boots", "footwear", "chelsea boots"],
   ["combat boots", "footwear", "combat boots"],
   ["doc martens", "footwear", "combat boots"],
   ["dr martens", "footwear", "combat boots"],
-  ["docs", "footwear", "combat boots"],
-  ["boots", "footwear", "lace-up boots"],
+  ["hiking boots", "footwear", "hiking boots"],
+  ["ankle boots", "footwear", "ankle boots"],
+  ["boots", "footwear", "boots"],
   ["loafers", "footwear", "loafers"],
   ["oxfords", "footwear", "oxford shoes"],
   ["oxford shoes", "footwear", "oxford shoes"],
   ["derbies", "footwear", "derby shoes"],
   ["derby shoes", "footwear", "derby shoes"],
   ["brogues", "footwear", "brogues"],
-  ["sneakers", "footwear", "sneakers"],
-  ["trainers", "footwear", "sneakers"],
   ["running shoes", "footwear", "running shoes"],
-  ["converse", "footwear", "canvas sneakers"],
+  ["sneakers", "footwear", "sneakers"],
+  ["trainers", "footwear", "trainers"],
   ["plimsolls", "footwear", "canvas sneakers"],
   ["boat shoes", "footwear", "boat shoes"],
+  ["heels", "footwear", "heels"],
+  ["pumps", "footwear", "pumps"],
+  ["flats", "footwear", "flats"],
+  ["mules", "footwear", "mules"],
+  ["slides", "footwear", "slides"],
+  ["flip flops", "footwear", "flip-flops"],
   ["sandals", "footwear", "sandals"],
-  ["shoes", "footwear", "derby shoes"],
+  ["shoes", "footwear", "shoes"],
+  // accessories
   ["scarf", "accessories", "scarf"],
   ["beanie", "accessories", "beanie"],
   ["flat cap", "accessories", "flat cap"],
-  ["newsboy cap", "accessories", "flat cap"],
-  ["fedora", "accessories", "fedora"],
+  ["bucket hat", "accessories", "bucket hat"],
   ["baseball cap", "accessories", "baseball cap"],
-  ["cap", "accessories", "baseball cap"],
-  ["hat", "accessories", "fedora"],
+  ["cap", "accessories", "cap"],
+  ["fedora", "accessories", "fedora"],
+  ["hat", "accessories", "hat"],
   ["belt", "accessories", "belt"],
   ["bow tie", "accessories", "bow tie"],
   ["tie", "accessories", "tie"],
   ["pocket square", "accessories", "pocket square"],
   ["backpack", "accessories", "backpack"],
   ["rucksack", "accessories", "backpack"],
-  ["satchel", "accessories", "bag"],
-  ["tote", "accessories", "bag"],
-  ["briefcase", "accessories", "bag"],
+  ["tote", "accessories", "tote bag"],
+  ["handbag", "accessories", "handbag"],
   ["bag", "accessories", "bag"],
   ["watch", "accessories", "watch"],
-  ["sunglasses", "accessories", "glasses"],
+  ["sunglasses", "accessories", "sunglasses"],
   ["glasses", "accessories", "glasses"],
   ["gloves", "accessories", "gloves"],
-  ["necklace", "accessories", "jewellery"],
-  ["ring", "accessories", "jewellery"],
+  ["socks", "accessories", "socks"],
+  ["necklace", "accessories", "necklace"],
+  ["earrings", "accessories", "earrings"],
+  ["bracelet", "accessories", "bracelet"],
+  ["ring", "accessories", "ring"],
+  // formalwear
   ["waistcoat", "formalwear", "waistcoat"],
   ["tuxedo", "formalwear", "tuxedo"],
   ["dinner suit", "formalwear", "tuxedo"],
+  ["tracksuit", "trousers", "track pants"],
   ["suit", "formalwear", "suit"],
 ];
 KEYWORDS.sort((a, b) => b[0].length - a[0].length);
 
+/** Refine a generic type with qualifiers the description actually contains. */
+function refineType(category: Category, subcategory: string, text: string): string {
+  const t = text.toLowerCase();
+  const has = (re: RegExp) => re.test(t);
+  const athletic = isAthletic(t);
+  switch (subcategory) {
+    case "shorts":
+      if (has(/\bchino/)) return "chino shorts";
+      if (has(/\b(denim|jean)/)) return "denim shorts";
+      if (has(/\bcargo/)) return "cargo shorts";
+      if (has(/\b(swim|board)\b/)) return "swim shorts";
+      if (has(/\b(bike|cycling)\b/)) return "bike shorts";
+      if (has(/\brunning\b/)) return "running shorts";
+      if (athletic) return "athletic shorts";
+      return "shorts";
+    case "trousers":
+      if (has(/\bchino/)) return "chinos";
+      if (has(/\bcargo/)) return "cargo trousers";
+      if (has(/\b(track|tracksuit)\b/)) return "track pants";
+      if (has(/\bsweat/)) return "sweatpants";
+      if (has(/\b(suit|tailored|dress)\b/)) return "tailored trousers";
+      if (has(/\bpleat/)) return "pleated trousers";
+      if (athletic) return "track pants";
+      return "trousers";
+    case "t-shirt":
+    case "top":
+      if (athletic && !has(/\bgraphic|band\b/)) return subcategory === "top" ? "sports top" : "sports t-shirt";
+      return subcategory;
+    case "shirt":
+      if (has(/\boxford\b/)) return "oxford shirt";
+      if (has(/\bflannel\b/)) return "flannel shirt";
+      if (has(/\bdenim\b/)) return "denim shirt";
+      if (has(/\blinen\b/)) return "linen shirt";
+      return "shirt";
+    case "jacket":
+      if (has(/\b(track|tracksuit)\b/)) return "track jacket";
+      if (has(/\b(rain|waterproof)\b/)) return "rain jacket";
+      if (has(/\b(puffer|down|quilted)\b/)) return "puffer jacket";
+      if (has(/\bdenim\b/)) return "denim jacket";
+      if (has(/\bleather\b/)) return "leather jacket";
+      if (has(/\bfleece\b/)) return "fleece jacket";
+      if (has(/\bsuit\b/)) return "suit jacket";
+      if (athletic) return "track jacket";
+      return "jacket";
+    case "coat":
+      if (has(/\brain|waterproof\b/)) return "raincoat";
+      if (has(/\b(puffer|down|quilted)\b/)) return "puffer coat";
+      return "coat";
+    case "shoes":
+      if (has(/\brunning\b/)) return "running shoes";
+      if (athletic) return "trainers";
+      return "shoes";
+    case "dress": {
+      const kind = t.match(/\b(slip|wrap|shirt|knit|sweater|midi|maxi|mini|bodycon|sun|tea|cocktail|evening)[- ]?dress/);
+      return kind ? `${kind[1]} dress` : "dress";
+    }
+    case "skirt": {
+      const kind = t.match(/\b(mini|midi|maxi|pencil|pleated|a-line|denim|wrap|slip|tennis)[- ]?skirt/);
+      return kind ? `${kind[1]} skirt` : "skirt";
+    }
+    case "boots":
+      if (has(/\bhiking|walking\b/)) return "hiking boots";
+      if (has(/\bankle\b/)) return "ankle boots";
+      return "boots";
+    default:
+      void category;
+      return subcategory;
+  }
+}
+
 const MATERIALS = [
-  "wool",
-  "merino",
-  "lambswool",
-  "cashmere",
-  "mohair",
-  "alpaca",
-  "tweed",
-  "flannel",
-  "cotton",
-  "linen",
-  "silk",
-  "denim",
-  "corduroy",
-  "cord",
-  "leather",
-  "suede",
-  "canvas",
-  "twill",
-  "jersey",
-  "fleece",
-  "nylon",
-  "polyester",
-  "gore-tex",
-  "waxed cotton",
-  "moleskin",
-  "velvet",
-  "rubber",
-  "down",
+  "wool", "merino", "lambswool", "cashmere", "mohair", "alpaca", "tweed", "flannel", "cotton", "organic cotton", "linen", "silk",
+  "satin", "chiffon", "lace", "velvet", "denim", "corduroy", "cord", "leather", "faux leather", "vegan leather", "suede", "canvas",
+  "twill", "jersey", "fleece", "nylon", "polyester", "recycled polyester", "spandex", "elastane", "lycra", "mesh", "acrylic",
+  "viscose", "rayon", "modal", "tencel", "lyocell", "bamboo", "gore-tex", "gabardine", "waxed cotton", "moleskin", "rubber", "down",
 ];
 
 const FIT_WORDS: [RegExp, Fit][] = [
@@ -211,25 +291,12 @@ const PATTERN_WORDS: [RegExp, Pattern][] = [
   [/\b(graphic|printed|band tee|logo)\b/, "graphic"],
 ];
 
+/** Style words are only recorded when the person uses them – none is implied. */
 const STYLE_WORDS = [
-  "dark academia",
-  "light academia",
-  "classic menswear",
-  "vintage",
-  "grunge",
-  "smart-casual",
-  "smart casual",
-  "minimalist",
-  "workwear",
-  "ivy",
-  "preppy",
-  "streetwear",
-  "gorpcore",
-  "romantic",
-  "punk",
-  "western",
-  "military",
-  "rock",
+  "athleisure", "boho", "business casual", "casual", "classic", "coastal", "cottagecore", "dark academia", "light academia",
+  "elegant", "glam", "goth", "gorpcore", "grunge", "hip-hop", "indie", "minimalist", "military", "modest", "preppy", "punk",
+  "retro", "romantic", "skater", "smart casual", "smart-casual", "sporty", "streetwear", "techwear", "vintage", "western",
+  "workwear", "y2k", "classic menswear", "ivy",
 ];
 
 const OCCASION_WORDS = ["college", "work", "office", "date", "party", "presentation", "interview", "wedding", "everyday", "evening", "travel", "hiking", "gym"];
@@ -304,9 +371,18 @@ function colourPhrases(text: string): Colour[] {
   return out.slice(0, 4).map((c) => toColour(c.name));
 }
 
-const titleCase = (s: string) => s.replace(/\b[a-z]/g, (c) => c.toUpperCase());
+const titleCase = (s: string) => s.replace(/(^|[\s-])[a-z]/g, (c) => c.toUpperCase());
 
 export type HeuristicResult = { input: GarmentInput; assumed: string[]; sourceText: string };
+
+const LEG_WORDS: [RegExp, NonNullable<GarmentDetails["leg"]>, string][] = [
+  [/\bwide[- ]leg|\bwide\b/, "wide", "wide-leg"],
+  [/\bskinny\b/, "skinny", "skinny"],
+  [/\bstraight[- ]leg|\bstraight\b/, "straight", "straight-leg"],
+  [/\btapered\b/, "tapered", "tapered"],
+  [/\b(flared|bootcut|boot-cut)\b/, "flared", "flared"],
+  [/\bbarrel\b/, "barrel", "barrel-leg"],
+];
 
 export function parseGarmentHeuristic(chunk: string): HeuristicResult | null {
   const hits = findKeywords(chunk);
@@ -314,33 +390,46 @@ export function parseGarmentHeuristic(chunk: string): HeuristicResult | null {
   const lower = chunk.toLowerCase();
   // prefer the most specific (longest) keyword as the garment noun
   const hit = [...hits].sort((a, b) => b.word.length - a.word.length)[0];
+  const subcategory = refineType(hit.category, hit.subcategory, chunk);
   const colours = colourPhrases(chunk);
-  const materials = MATERIALS.filter((m) => new RegExp(`\\b${m}\\b`).test(lower)).map((m) => (m === "cord" ? "corduroy" : m));
+  const found = MATERIALS.filter((m) => new RegExp(`\\b${m}\\b`).test(lower)).map((m) => (m === "cord" ? "corduroy" : m));
+  // "faux leather" shouldn't also list "leather"
+  const materials = [...new Set(found)].filter((m, _i, all) => !all.some((o) => o !== m && o.includes(m)));
   const fit = FIT_WORDS.find(([re]) => re.test(lower))?.[1];
   const pattern = PATTERN_WORDS.find(([re]) => re.test(lower))?.[1];
-  const styleTags = STYLE_WORDS.filter((w) => lower.includes(w)).map((w) => (w === "smart casual" ? "smart-casual" : w));
+  const brand = detectBrand(chunk);
+  const styleTags = STYLE_WORDS.filter((w) => new RegExp(`\\b${w}\\b`).test(lower)).map((w) => (w === "smart casual" ? "smart-casual" : w));
   const occasions = OCCASION_WORDS.filter((w) => new RegExp(`\\b${w}\\b`).test(lower));
   const seasons = (["spring", "summer", "autumn", "winter"] as Season[]).filter((s) => lower.includes(s) || (s === "autumn" && lower.includes("fall")));
+  const leg = hit.category === "trousers" ? LEG_WORDS.find(([re]) => re.test(lower)) : undefined;
+  const estimate = estimateTraits({ category: hit.category, subcategory, name: chunk, materials });
+  // warmth & formality are never stated in prose this simple: they're estimated from the type
   const assumed: string[] = ["warmth", "formality"];
   if (!colours.length) assumed.push("colours");
   if (!fit) assumed.push("fit");
   const colourWord = colours[0]?.name ? `${colours[0].name.split(",")[0]} ` : "";
-  const materialWord = materials[0] && !hit.subcategory.includes(materials[0]) ? `${materials[0]} ` : "";
-  const name = titleCase(`${colourWord}${materialWord}${hit.subcategory}`.trim());
+  const brandWord = brand ? `${brand} ` : "";
+  const materialWord = materials[0] && !subcategory.includes(materials[0]) ? `${materials[0]} ` : "";
+  // name the garment with the person's own noun; a refined type they didn't write ("athletic") stays in subcategory
+  const noun = lower.includes(subcategory) ? subcategory : hit.subcategory;
+  const name = `${titleCase(colourWord)}${brandWord}${titleCase(`${materialWord}${noun}`)}`.trim().slice(0, 120);
   const input: GarmentInput = {
-    name,
+    name: name.charAt(0).toUpperCase() + name.slice(1),
     category: hit.category,
-    subcategory: hit.subcategory,
+    subcategory,
     colours,
     pattern: pattern ?? "solid",
     materials,
     fit: fit ?? null,
-    layeringRole: defaultLayeringRole(hit.category, hit.subcategory),
-    warmth: 3,
-    formality: 3,
+    silhouette: leg ? leg[2] : null,
+    layeringRole: defaultLayeringRole(hit.category, subcategory),
+    warmth: estimate.warmth,
+    formality: estimate.formality,
     seasons,
     styleTags,
     occasions,
+    brand,
+    details: leg ? { leg: leg[1] } : {},
     notes: chunk.length > 0 ? chunk.slice(0, 400) : null,
   };
   return { input, assumed, sourceText: chunk };
@@ -352,4 +441,3 @@ export function parseWardrobeText(text: string): HeuristicResult[] {
     .filter((r): r is HeuristicResult => r !== null)
     .slice(0, 60);
 }
-

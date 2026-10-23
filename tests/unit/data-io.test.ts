@@ -15,25 +15,26 @@ import { weatherCache } from "@/server/db/schema";
 import { proxy } from "@/proxy";
 import { fakeAi, seedSample } from "../helpers";
 
+const U = "unspecified";
 const AI_GARMENT = {
   name: "Charcoal tweed blazer",
   category: "outerwear",
   subcategory: "blazer",
   colours: [{ name: "dark brown, almost charcoal", hex: "#3e332a" }],
-  pattern: null,
+  pattern: U,
   materials: ["wool"],
   fit: "relaxed",
-  silhouette: null,
-  layering_role: null,
-  warmth: null,
+  silhouette: "",
+  layering_role: U,
+  warmth: 0,
   formality: 4,
   seasons: [],
   weather: [],
   occasions: ["college"],
   style_tags: ["dark academia", "smart-casual"],
-  brand: null,
-  notes: null,
-  details: { sleeve: null, neckline: null, collar: null, lapel: "notch", closure: null, length: null, leg: null, height: null },
+  brand: "",
+  notes: "",
+  details: { sleeve: U, neckline: U, collar: U, lapel: "notch", closure: U, length: U, leg: U, height: U },
   estimated_fields: ["formality"],
   source_text: "dark brown, almost charcoal blazer, relaxed fit",
 };
