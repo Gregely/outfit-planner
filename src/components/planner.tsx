@@ -1,5 +1,6 @@
 "use client";
 
+import type { AiUi } from "@/lib/ai-providers";
 import Link from "next/link";
 import { useState } from "react";
 import type { DayView } from "@/server/services/plans";
@@ -21,7 +22,7 @@ type Props = {
   weatherStatus: WeatherStatus;
   units: "metric" | "imperial";
   savedOutfits: { id: number; name: string }[];
-  ai: { enabled: boolean; reason: string | null };
+  ai: AiUi;
 };
 
 export function PlannerWeek({ start, today, days, weatherStatus, units, savedOutfits, ai }: Props) {
@@ -58,7 +59,7 @@ export function PlannerWeek({ start, today, days, weatherStatus, units, savedOut
         </Field>
         <label className={cx("flex items-center gap-2 text-sm", !ai.enabled && "text-muted")} title={ai.reason ?? undefined}>
           <input type="checkbox" className="accent-accent" checked={useAi && ai.enabled} disabled={!ai.enabled} onChange={(e) => setUseAi(e.target.checked)} />
-          <SparkIcon size={14} /> Claude
+          <SparkIcon size={14} /> {ai.label ?? "AI"}
         </label>
         <Button
           variant="accent"

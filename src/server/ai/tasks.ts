@@ -30,8 +30,8 @@ import { callStructured } from "./client";
 /* ------------------------------------------------------------------ */
 
 /*
- * Structured-output schemas must stay within the API's limits (16 union-typed parameters per
- * request), so "unknown" is expressed with explicit sentinels instead of nullable fields:
+ * Structured-output schemas must stay within every provider's limits (Anthropic documents 16
+ * union-typed parameters per request; others reject deep anyOf / long optional runs), so "unknown" is expressed with explicit sentinels instead of nullable fields:
  * "" for text, "unspecified" for choices, 0 for scores and [] for lists. Callers translate them.
  */
 export const UNSPECIFIED = "unspecified" as const;
@@ -90,9 +90,9 @@ export async function aiExtractGarments(text: string) {
     system: EXTRACT_SYSTEM,
     prompt: `Create a record for each garment in this text:\n\n<wardrobe_text>\n${text}\n</wardrobe_text>`,
     schema: aiExtractionSchema,
-    effort: "low",
+    group: "import",
   });
-  return out.garments;
+  return { garments: out.data.garments, meta: out.meta };
 }
 
 /* ------------------------------------------------------------------ */
@@ -116,9 +116,9 @@ export async function aiParseActivities(text: string, date: string) {
       "You turn a short description of someone's day into a list of activities for outfit planning. Use 24-hour times only when the text gives or clearly implies them; otherwise \"\". Pick the dress code the activity implies (use 'none' if unclear) and whether it's indoors, outdoors or mixed. Do not add activities that aren't mentioned.",
     prompt: `The day is ${formatDate(date, { weekday: true, year: true })}.\n\n<day_plan>\n${text}\n</day_plan>`,
     schema: aiActivitiesSchema,
-    effort: "low",
+    group: "import",
   });
-  return out.activities;
+  return { activities: out.data.activities, meta: out.meta };
 }
 
 /* ------------------------------------------------------------------ */
@@ -255,8 +255,8 @@ export async function aiSuggestOutfits(p: StylistPromptParts, count: number, rep
   ]
     .filter(Boolean)
     .join("\n\n");
-  const out = await callStructured({ task: "outfit suggestions", system: STYLIST_SYSTEM, prompt, schema: aiOutfitsSchema });
-  return out.outfits;
+  const out = await callStructured({ task: "outfit suggestions", group: "daily", system: STYLIST_SYSTEM, prompt, schema: aiOutfitsSchema });
+  return { outfits: out.data.outfits, meta: out.meta };
 }
 
 export async function aiPlanWeek(
@@ -275,8 +275,8 @@ export async function aiPlanWeek(
   ]
     .filter(Boolean)
     .join("\n\n");
-  const out = await callStructured({ task: "week planning", system: STYLIST_SYSTEM, prompt, schema: aiWeekSchema, maxTokens: 64000 });
-  return out.days;
+  const out = await callStructured({ task: "week planning", group: "weekly", system: STYLIST_SYSTEM, prompt, schema: aiWeekSchema, maxTokens: 64000 });
+  return { days: out.data.days, meta: out.meta };
 }
 
 export async function aiReplaceGarment(p: StylistPromptParts & { current: Garment[]; target: Garment; instruction: string }) {
@@ -286,8 +286,8 @@ export async function aiReplaceGarment(p: StylistPromptParts & { current: Garmen
     `CURRENT OUTFIT:\n${p.current.map((g) => `- #${g.id} ${g.name} (${slotFor(g)})`).join("\n")}`,
     `Replace ONLY #${p.target.id} ${p.target.name} with up to three alternatives from the available garments, best first. Every other garment stays exactly as it is. Each alternative must fill the same role in the outfit.${p.instruction ? ` Client's note: ${p.instruction}` : ""}`,
   ].join("\n\n");
-  const out = await callStructured({ task: "item replacement", system: STYLIST_SYSTEM, prompt, schema: aiAlternativesSchema, effort: "low" });
-  return out.alternatives;
+  const out = await callStructured({ task: "item replacement", group: "daily", system: STYLIST_SYSTEM, prompt, schema: aiAlternativesSchema });
+  return { alternatives: out.data.alternatives, meta: out.meta };
 }
 
 export async function aiAdjustOutfit(p: StylistPromptParts & { current: Garment[]; instruction: string }) {
@@ -297,8 +297,8 @@ export async function aiAdjustOutfit(p: StylistPromptParts & { current: Garment[
     `CURRENT OUTFIT:\n${p.current.map((g) => `- #${g.id} ${g.name} (${slotFor(g)})`).join("\n")}`,
     `ADJUSTMENT REQUESTED: ${p.instruction}\nChange as few garments as possible to achieve it and keep the rest. In the explanation, say what changed and why.`,
   ].join("\n\n");
-  const out = await callStructured({ task: "outfit adjustment", system: STYLIST_SYSTEM, prompt, schema: aiOutfitSchema, effort: "low" });
-  return out;
+  const out = await callStructured({ task: "outfit adjustment", group: "daily", system: STYLIST_SYSTEM, prompt, schema: aiOutfitSchema });
+  return { outfit: out.data, meta: out.meta };
 }
 
 export async function aiGapAnalysis(garments: Garment[], profile: Profile) {
@@ -313,7 +313,7 @@ export async function aiGapAnalysis(garments: Garment[], profile: Profile) {
       "You are a thoughtful personal stylist reviewing a client's wardrobe on its own terms – whatever their style – without steering them toward any particular aesthetic. Use only garment ids that appear in the list.",
     prompt,
     schema: aiGapsSchema,
-    effort: "low",
+    group: "daily",
   });
-  return out.gaps;
+  return { gaps: out.data.gaps, meta: out.meta };
 }

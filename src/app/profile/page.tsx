@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import { connection } from "next/server";
 import { getProfile, listFeedback, listRules } from "@/server/services/preferences";
 import { listGarments } from "@/server/services/garments";
-import { aiStatus } from "@/server/ai/client";
+import { aiUi } from "@/server/ai/client";
 import { today } from "@/server/services/settings";
 import { PageHeader, Section, Skeleton } from "@/components/ui";
 import { ProfileForm, RulesManager, FeedbackLog, GapAnalysis } from "@/components/profile";
@@ -36,7 +36,7 @@ async function ProfileContent() {
         <FeedbackLog feedback={listFeedback(60)} names={names} today={today()} />
       </Section>
       <Section title="Wardrobe gaps" eyebrow="Optional">
-        <GapAnalysis aiEnabled={aiStatus().enabled} />
+        <GapAnalysis ai={aiUi("daily")} />
       </Section>
     </>
   );

@@ -454,7 +454,7 @@ export const RULE_KIND_LABELS: Record<RuleKind, string> = {
 export const OUTFIT_SOURCES = ["ai", "rules", "manual"] as const;
 export type OutfitSource = (typeof OUTFIT_SOURCES)[number];
 export const SOURCE_LABELS: Record<OutfitSource, string> = {
-  ai: "Claude stylist",
+  ai: "AI stylist",
   rules: "Rule-based",
   manual: "Hand-picked",
 };

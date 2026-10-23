@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import type { Profile } from "@/lib/schemas";
+import type { AiUi } from "@/lib/ai-providers";
 import type { Feedback, StyleRule } from "@/server/db/schema";
 import { FEEDBACK_LABELS, FITS, RULE_KINDS, RULE_KIND_LABELS, SUGGESTED_STYLE_TAGS, type RuleKind } from "@/lib/domain";
 import { formatDate } from "@/lib/dates";
@@ -24,7 +25,7 @@ export function ProfileForm({ profile }: { profile: Profile }) {
         run("save", () => api("/api/profile", { method: "PUT", body: p }), { success: "Profile saved" });
       }}
     >
-      <Field label="Your style, in your own words" hint="Claude reads this when suggesting outfits.">
+      <Field label="Your style, in your own words" hint="The AI stylist reads this when suggesting outfits.">
         <textarea
           className="input min-h-28 font-serif text-base leading-relaxed"
           value={p.styleDescription}
@@ -216,7 +217,7 @@ function RuleDialog({ open, onClose, garments }: { open: boolean; onClose: () =>
           </Field>
         ) : null}
         {kind === "note" ? (
-          <Field label="Rule" hint="Passed to Claude as a standing instruction (the rule-based stylist can't read free text).">
+          <Field label="Rule" hint="Passed to the AI stylist as a standing instruction (the rule-based stylist can't read free text).">
             <input className="input" value={text} onChange={(e) => setText(e.target.value)} placeholder="e.g. Always wear the waterproof jacket when cycling." />
           </Field>
         ) : null}
@@ -271,14 +272,16 @@ export function FeedbackLog({ feedback, names, today }: { feedback: Feedback[]; 
 
 type Gap = { piece: string; why: string; pairsWith: { id: number; name: string }[]; priority: "high" | "medium" | "low"; source: "ai" | "rules" };
 
-export function GapAnalysis({ aiEnabled }: { aiEnabled: boolean }) {
-  const [res, setRes] = useState<{ gaps: Gap[]; notice: string | null } | null>(null);
+type GapResult = { gaps: Gap[]; notice: string | null; generatedBy: string | null };
+
+export function GapAnalysis({ ai }: { ai: AiUi }) {
+  const [res, setRes] = useState<GapResult | null>(null);
   const { run, pending } = useMutation();
-  const analyse = (ai: boolean) =>
+  const analyse = (useAi: boolean) =>
     run(
       "gaps",
       async () => {
-        const r = await api<{ gaps: Gap[]; notice: string | null }>(`/api/gaps${ai ? "?ai=1" : ""}`);
+        const r = await api<GapResult>(`/api/gaps${useAi ? "?ai=1" : ""}`);
         setRes(r);
         return r;
       },
@@ -291,13 +294,14 @@ export function GapAnalysis({ aiEnabled }: { aiEnabled: boolean }) {
         <Button busy={pending === "gaps"} onClick={() => analyse(false)}>
           <WandIcon size={15} /> Quick check
         </Button>
-        {aiEnabled ? (
+        {ai.enabled ? (
           <Button variant="accent" busy={pending === "gaps"} onClick={() => analyse(true)}>
-            <SparkIcon size={15} /> Ask Claude
+            <SparkIcon size={15} /> Ask {ai.label ?? "AI"}
           </Button>
         ) : null}
       </div>
       {res?.notice ? <Notice tone="info">{res.notice}</Notice> : null}
+      {res?.generatedBy ? <p className="text-xs text-muted">Suggested by {res.generatedBy} – checked against your wardrobe.</p> : null}
       {res ? (
         res.gaps.length ? (
           <div className="grid gap-3 md:grid-cols-2">

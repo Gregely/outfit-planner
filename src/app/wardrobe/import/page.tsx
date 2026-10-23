@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import { connection } from "next/server";
 import { PageHeader, Skeleton } from "@/components/ui";
 import { ImportFlow } from "@/components/import-flow";
-import { aiStatus, REASON_TEXT } from "@/server/ai/client";
+import { aiUi } from "@/server/ai/client";
 import { getCareDefaults } from "@/server/services/settings";
 
 export const metadata = { title: "Import garments" };
@@ -25,11 +25,11 @@ export default function ImportPage(props: PageProps<"/wardrobe/import">) {
 async function ImportContent({ searchParams }: { searchParams: PageProps<"/wardrobe/import">["searchParams"] }) {
   const sp = await searchParams;
   await connection();
-  const ai = aiStatus();
+  const ai = aiUi("import");
   return (
     <ImportFlow
       initialTab={sp.tab === "csv" ? "csv" : "text"}
-      ai={{ enabled: ai.enabled, reason: ai.reason ? REASON_TEXT[ai.reason] : null }}
+      ai={ai}
       care={getCareDefaults()}
     />
   );

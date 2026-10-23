@@ -111,16 +111,16 @@ describe("CSV import/export and backups", () => {
     expect(() => extractGarmentsFromCsv("colour\nred")).toThrow(/name.*category/);
   });
 
-  it("exports and restores a full backup, preserving history and ids", () => {
+  it("exports and restores a full backup, preserving history and ids", async () => {
     const g = seedSample();
     const o = createOutfit({ name: "Look", source: "manual", saved: true, garmentIds: [g["White t-shirt"].id, g["Raw denim jeans"].id, g["Black combat boots"].id] });
     markOutfitWorn(o.id, today());
     saveSettings({ units: "imperial" });
-    const backup = JSON.parse(JSON.stringify(exportBackup()));
+    const backup = JSON.parse(JSON.stringify(await exportBackup()));
     expect(backup.data.garments[0].illustrationSvg).toBeUndefined();
     // change things, then restore
     createGarment({ name: "Added later", category: "tops" });
-    const counts = restoreBackup(backup);
+    const counts = await restoreBackup(backup);
     expect(counts.garments).toBe(29);
     expect(listGarments().some((x) => x.name === "Added later")).toBe(false);
     expect(getOutfit(o.id).timesWorn).toBe(1);
@@ -128,15 +128,15 @@ describe("CSV import/export and backups", () => {
     expect(getGarment(g["White t-shirt"].id).status).toBe("worn");
   });
 
-  it("rejects invalid or malicious backups without touching data", () => {
+  it("rejects invalid or malicious backups without touching data", async () => {
     seedSample();
-    expect(() => restoreBackup({ app: "something-else" })).toThrow(/valid Wardrobe Studio backup/);
-    const backup = JSON.parse(JSON.stringify(exportBackup()));
+    await expect(restoreBackup({ app: "something-else" })).rejects.toThrow(/valid Wardrobe Studio backup/);
+    const backup = JSON.parse(JSON.stringify(await exportBackup()));
     backup.data.garments[0].colours = [{ name: "x", hex: '"/><script>' }];
-    expect(() => restoreBackup(backup)).toThrow();
-    const broken = JSON.parse(JSON.stringify(exportBackup()));
+    await expect(restoreBackup(backup)).rejects.toThrow();
+    const broken = JSON.parse(JSON.stringify(await exportBackup()));
     broken.data.outfitItems = [{ id: 1, outfitId: 999, garmentId: 1, slot: "top", position: 0, snapshot: { name: "x", category: "tops", subcategory: null, colours: [], pattern: "solid" } }];
-    expect(() => restoreBackup(broken)).toThrow(/couldn't be restored/);
+    await expect(restoreBackup(broken)).rejects.toThrow(/couldn't be restored/);
     expect(listGarments()).toHaveLength(29);
   });
 });

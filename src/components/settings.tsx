@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import type { AppSettings, SavedLocation } from "@/lib/schemas";
 import { CATEGORIES, CATEGORY_LABELS, type CareDefault, type Category } from "@/lib/domain";
 import { api } from "@/lib/client-api";
-import { Badge, Button, Field, Notice } from "./ui";
-import { useConfirm, useMutation, useToast } from "./feedback-ui";
+import { Button, Field } from "./ui";
+import { useConfirm, useMutation } from "./feedback-ui";
 import { DownloadIcon, MapPinIcon, RefreshIcon, SearchIcon, UploadIcon } from "./icons";
 
 type GeoResult = { name: string; latitude: number; longitude: number; timezone: string; country: string | null };
@@ -140,58 +140,6 @@ export function GeneralSettings({ settings }: { settings: AppSettings }) {
           <option value="sunday">Calendar weeks (Sunday start)</option>
         </select>
       </Field>
-    </div>
-  );
-}
-
-export function AiSettings({
-  enabled,
-  status,
-}: {
-  enabled: boolean;
-  status: { enabled: boolean; reason: string | null; configured: boolean; model: string; effort: string | null };
-}) {
-  const { run, pending } = useMutation();
-  const toast = useToast();
-  return (
-    <div className="card space-y-4 p-5">
-      <div className="flex flex-wrap items-center gap-2">
-        {status.enabled ? <Badge tone="moss">Active</Badge> : <Badge tone="neutral">Off</Badge>}
-        <span className="text-sm">
-          Model <code className="rounded bg-paper-deep px-1">{status.model}</code>
-          {status.effort ? (
-            <>
-              {" "}
-              · effort <code className="rounded bg-paper-deep px-1">{status.effort}</code>
-            </>
-          ) : null}
-        </span>
-      </div>
-      {!status.configured ? (
-        <Notice tone="info">
-          Claude isn&apos;t configured. Add <code>ANTHROPIC_API_KEY</code> to <code>.env.local</code> and restart the app. Everything else – wardrobe, illustrations, laundry, the rule-based stylist, planner and backups – works without it.
-        </Notice>
-      ) : null}
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          className="accent-accent"
-          checked={enabled}
-          onChange={(e) => run("toggle", () => api("/api/settings", { method: "PUT", body: { aiEnabled: e.target.checked } }), { success: e.target.checked ? "Claude switched on" : "Claude switched off" })}
-        />
-        Use Claude for suggestions, imports and planning
-      </label>
-      <Button
-        disabled={!status.configured}
-        busy={pending === "test"}
-        onClick={async () => {
-          const r = await run("test", () => api<{ ok: boolean; message: string }>("/api/settings/test-ai", { method: "POST" }), { refresh: false });
-          if (r) toast({ title: r.ok ? "Claude is working" : "Claude isn't reachable", body: r.message, tone: r.ok ? "success" : "error" });
-        }}
-      >
-        Test connection
-      </Button>
-      <p className="text-xs text-muted">The API key stays on the server and is never sent to the browser. Every Claude suggestion is checked against your wardrobe and rules before it&apos;s shown.</p>
     </div>
   );
 }

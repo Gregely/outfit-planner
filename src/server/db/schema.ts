@@ -75,6 +75,9 @@ export type OutfitContext = {
   activities?: string[];
 };
 
+/** Which AI provider and model produced an outfit (null for rule-based and hand-made outfits). */
+export type GeneratedBy = { provider: string; providerLabel: string; model: string };
+
 export const outfits = sqliteTable(
   "outfits",
   {
@@ -90,6 +93,7 @@ export const outfits = sqliteTable(
     saved: integer("saved", { mode: "boolean" }).notNull().default(false),
     archived: integer("archived", { mode: "boolean" }).notNull().default(false),
     basedOnOutfitId: integer("based_on_outfit_id"),
+    generatedBy: text("generated_by", { mode: "json" }).$type<GeneratedBy | null>(),
     createdAt: text("created_at").notNull().default(now),
     updatedAt: text("updated_at").notNull().default(now),
   },

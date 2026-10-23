@@ -1,5 +1,6 @@
 "use client";
 
+import type { AiUi } from "@/lib/ai-providers";
 import { useState } from "react";
 import type { OutfitView } from "@/server/services/outfits";
 import { api } from "@/lib/client-api";
@@ -62,7 +63,7 @@ function GarmentPicker({ label, all, value, onChange }: { label: string; all: Ga
   );
 }
 
-export function StylistPanel({ garments, today, ai }: { garments: GarmentLite[]; today: string; ai: { enabled: boolean; reason: string | null } }) {
+export function StylistPanel({ garments, today, ai }: { garments: GarmentLite[]; today: string; ai: AiUi }) {
   const [prompt, setPrompt] = useState("");
   const [occasion, setOccasion] = useState<string | null>(null);
   const [date, setDate] = useState(today);
@@ -135,7 +136,7 @@ export function StylistPanel({ garments, today, ai }: { garments: GarmentLite[];
           <div className="flex flex-wrap items-center justify-between gap-3">
             <label className={cx("flex items-center gap-2 text-sm", !ai.enabled && "text-muted")}>
               <input type="checkbox" className="accent-accent" checked={useAi && ai.enabled} disabled={!ai.enabled} onChange={(e) => setUseAi(e.target.checked)} />
-              <SparkIcon size={14} /> Ask Claude
+              <SparkIcon size={14} /> Ask {ai.label ?? "AI"}
               {!ai.enabled ? <span className="text-xs">({ai.reason} – the rule-based stylist will answer)</span> : null}
             </label>
             <Button variant="accent" busy={pending === "ask"} onClick={ask}>
@@ -146,7 +147,7 @@ export function StylistPanel({ garments, today, ai }: { garments: GarmentLite[];
       </div>
       {pending === "ask" ? (
         <div className="mt-5 flex items-center gap-2 text-sm text-muted">
-          <Spinner /> {useAi && ai.enabled ? "Claude is going through your wardrobe…" : "Putting outfits together…"}
+          <Spinner /> {useAi && ai.enabled ? `${ai.label ?? "The AI stylist"} is going through your wardrobe…` : "Putting outfits together…"}
         </div>
       ) : null}
       {result ? (

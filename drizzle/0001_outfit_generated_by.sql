@@ -1,0 +1,1 @@
+ALTER TABLE `outfits` ADD `generated_by` text;

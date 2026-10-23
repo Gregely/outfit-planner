@@ -16,7 +16,7 @@ export const POST = route<P>(async (req, { id }) => {
   const form = await req.formData().catch(() => null);
   const file = form?.get("photo");
   if (!file || typeof file === "string") throw new BadRequestError("Choose an image to upload.");
-  const name = savePhotoFile(gid, new Uint8Array(await file.arrayBuffer()));
+  const name = await savePhotoFile(gid, new Uint8Array(await file.arrayBuffer()));
   getDb().update(garments).set({ photoFile: name, updatedAt: new Date().toISOString() }).where(eq(garments.id, gid)).run();
   if (existing.photoFile) deletePhotoFile(existing.photoFile);
   return { garment: getGarment(gid) };

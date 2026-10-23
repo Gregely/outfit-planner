@@ -4,7 +4,7 @@ import { getWeek } from "@/server/services/plans";
 import { getSettings, today } from "@/server/services/settings";
 import { listOutfits } from "@/server/services/outfits";
 import { listGarments } from "@/server/services/garments";
-import { aiStatus, REASON_TEXT } from "@/server/ai/client";
+import { aiUi } from "@/server/ai/client";
 import { isDateString, startOfWeek } from "@/lib/dates";
 import { PageHeader, Skeleton, EmptyState } from "@/components/ui";
 import { PlannerWeek } from "@/components/planner";
@@ -32,7 +32,7 @@ async function PlannerContent({ searchParams }: { searchParams: PageProps<"/plan
   const requested = typeof sp.start === "string" && isDateString(sp.start) ? sp.start : t;
   const start = settings.plannerStart === "today" ? requested : startOfWeek(requested, settings.plannerStart === "sunday" ? 0 : 1);
   const { days, weatherStatus } = await getWeek(start);
-  const ai = aiStatus();
+  const ai = aiUi("weekly");
   const saved = listOutfits({ view: "saved" }).map((o) => ({ id: o.id, name: o.name }));
   return (
     <PlannerWeek
@@ -42,7 +42,7 @@ async function PlannerContent({ searchParams }: { searchParams: PageProps<"/plan
       weatherStatus={weatherStatus}
       units={settings.units}
       savedOutfits={saved}
-      ai={{ enabled: ai.enabled, reason: ai.reason ? REASON_TEXT[ai.reason] : null }}
+      ai={ai}
     />
   );
 }

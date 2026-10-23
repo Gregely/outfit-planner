@@ -83,13 +83,14 @@ export async function parseDayPlan(text: string, date: string, opts: { useAi?: b
   if (clean.length > 2000) throw new BadRequestError("Please keep the description under 2,000 characters.");
   let notice: string | null = null;
   if (opts.useAi !== false) {
-    const status = aiStatus();
+    const status = aiStatus("import");
     if (status.enabled) {
       try {
-        const acts = await aiParseActivities(clean, date);
+        const { activities: acts, meta } = await aiParseActivities(clean, date);
         return {
           method: "ai" as const,
           notice: null,
+          generatedBy: meta,
           activities: acts.slice(0, 12).map(
             (a): ActivityInput => ({
               date,
@@ -104,9 +105,9 @@ export async function parseDayPlan(text: string, date: string, opts: { useAi?: b
         };
       } catch (err) {
         if (!(err instanceof AiUnavailableError)) throw err;
-        notice = `Claude couldn't read it – ${describeAiError(err)}. Used the offline parser.`;
+        notice = `${status.providerLabel} couldn't read it – ${describeAiError(err)}. Used the offline parser.`;
       }
     }
   }
-  return { method: "rules" as const, notice, activities: parseActivitiesHeuristic(clean, date) };
+  return { method: "rules" as const, notice, generatedBy: null, activities: parseActivitiesHeuristic(clean, date) };
 }

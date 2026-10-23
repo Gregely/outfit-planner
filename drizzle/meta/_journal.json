@@ -8,6 +8,13 @@
       "when": 1792756541698,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1792789692246,
+      "tag": "0001_outfit_generated_by",
+      "breakpoints": true
     }
   ]
 }

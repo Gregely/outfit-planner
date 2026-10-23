@@ -1,7 +1,6 @@
 import "server-only";
-import fs from "node:fs";
-import path from "node:path";
 import { z } from "zod";
+import { notInArray } from "drizzle-orm";
 import { getDb } from "@/server/db";
 import * as t from "@/server/db/schema";
 import {
@@ -19,7 +18,10 @@ import { csvToObjects, toCsv } from "@/lib/csv";
 import { toColour } from "@/lib/colours";
 import { illustrationKey, renderGarmentSvg } from "@/lib/illustration/render";
 import { BadRequestError } from "@/server/errors";
-import { photoDir, sniffImage, MAX_PHOTO_BYTES } from "./photos";
+import { photoStore } from "@/server/platform/photo-store";
+import { base64ToBytes, bytesToBase64 } from "@/lib/base64";
+import { sniffImage, MAX_PHOTO_BYTES } from "./photos";
+import { DEVICE_SETTING_KEYS } from "./settings";
 
 export const BACKUP_VERSION = 1;
 
@@ -81,6 +83,7 @@ export const backupSchema = z.object({
           saved: z.boolean(),
           archived: z.boolean(),
           basedOnOutfitId: z.number().int().nullable().default(null),
+          generatedBy: z.object({ provider: z.string().max(60), providerLabel: z.string().max(80), model: z.string().max(200) }).nullable().default(null),
           createdAt: ts,
           updatedAt: ts,
         }),
@@ -162,7 +165,11 @@ export const backupSchema = z.object({
 });
 export type Backup = z.infer<typeof backupSchema>;
 
-export function exportBackup(opts: { includePhotos?: boolean } = {}): Backup {
+/**
+ * Everything about the wardrobe, as one JSON document. Device configuration (AI providers and
+ * models) is deliberately left out, and API keys are never stored in the database at all.
+ */
+export async function exportBackup(opts: { includePhotos?: boolean } = {}): Promise<Backup> {
   const db = getDb();
   const garments = db
     .select()
@@ -174,12 +181,12 @@ export function exportBackup(opts: { includePhotos?: boolean } = {}): Backup {
   if (opts.includePhotos !== false) {
     for (const g of garments) {
       if (!g.photoFile) continue;
-      const file = path.join(/*turbopackIgnore: true*/ photoDir(), g.photoFile);
-      if (fs.existsSync(file)) photos[g.photoFile] = fs.readFileSync(file).toString("base64");
+      const data = await photoStore.read(g.photoFile);
+      if (data) photos[g.photoFile] = bytesToBase64(data);
     }
   }
   const profileRow = db.select().from(t.profile).get();
-  const settingsRow = db.select().from(t.settings).all();
+  const settingsRow = db.select().from(t.settings).all().filter((r) => !DEVICE_SETTING_KEYS.includes(r.key));
   return {
     app: "wardrobe-studio",
     version: BACKUP_VERSION,
@@ -202,8 +209,11 @@ export function exportBackup(opts: { includePhotos?: boolean } = {}): Backup {
   };
 }
 
-/** Replace all data with a validated backup. Runs in one transaction: all or nothing. */
-export function restoreBackup(raw: unknown) {
+/**
+ * Replace all data with a validated backup. Runs in one transaction: all or nothing. This
+ * device's AI configuration is kept, and any device keys in an older backup are ignored.
+ */
+export async function restoreBackup(raw: unknown) {
   const parsed = backupSchema.safeParse(raw);
   if (!parsed.success) {
     throw new BadRequestError("That file isn't a valid Wardrobe Studio backup.", parsed.error.issues.slice(0, 8));
@@ -212,9 +222,14 @@ export function restoreBackup(raw: unknown) {
   const d = b.data;
   const db = getDb();
   // Validate photos before touching anything.
-  const photos: [string, Buffer][] = [];
+  const photos: [string, Uint8Array][] = [];
   for (const [name, b64] of Object.entries(b.photos)) {
-    const buf = Buffer.from(b64, "base64");
+    let buf: Uint8Array;
+    try {
+      buf = base64ToBytes(b64);
+    } catch {
+      continue;
+    }
     if (buf.length > MAX_PHOTO_BYTES || !sniffImage(buf)) continue;
     photos.push([name, buf]);
   }
@@ -231,11 +246,11 @@ export function restoreBackup(raw: unknown) {
         t.outfits,
         t.garments,
         t.profile,
-        t.settings,
         t.weatherCache,
       ]) {
         tx.delete(table).run();
       }
+      tx.delete(t.settings).where(notInArray(t.settings.key, DEVICE_SETTING_KEYS)).run();
       for (const g of d.garments) {
         const fields = {
           ...g,
@@ -267,16 +282,15 @@ export function restoreBackup(raw: unknown) {
       if (d.feedback.length) tx.insert(t.feedback).values(d.feedback).run();
       if (d.styleRules.length) tx.insert(t.styleRules).values(d.styleRules).run();
       if (d.profile) tx.insert(t.profile).values({ id: 1, data: d.profile }).run();
-      for (const [key, value] of Object.entries(d.settings ?? {})) tx.insert(t.settings).values({ key, value }).run();
+      for (const [key, value] of Object.entries(d.settings ?? {})) {
+        if (!DEVICE_SETTING_KEYS.includes(key)) tx.insert(t.settings).values({ key, value }).run();
+      }
     });
   } catch (err) {
     if (err instanceof BadRequestError) throw err;
     throw new BadRequestError(`The backup couldn't be restored: ${(err as Error).message}`);
   }
-  if (photos.length) {
-    fs.mkdirSync(photoDir(), { recursive: true });
-    for (const [name, buf] of photos) fs.writeFileSync(path.join(/*turbopackIgnore: true*/ photoDir(), name), buf);
-  }
+  for (const [name, buf] of photos) await photoStore.write(name, buf);
   return { garments: d.garments.length, outfits: d.outfits.length, wearLogs: d.wearLogs.length, photos: photos.length };
 }
 

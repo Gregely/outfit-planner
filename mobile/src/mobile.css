@@ -1,0 +1,37 @@
+/* Android-only additions on top of the web app's styles. */
+.route-progress {
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: 3px;
+  z-index: 100;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--color-accent), transparent);
+  background-size: 50% 100%;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.route-progress.is-busy {
+  opacity: 1;
+  animation: route-progress 1s linear infinite;
+}
+@keyframes route-progress {
+  from { background-position: -50% 0; }
+  to { background-position: 150% 0; }
+}
+
+html.native-app,
+html.native-app body {
+  overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
+}
+html.native-app main {
+  padding-top: max(1.5rem, calc(env(safe-area-inset-top) + 0.75rem));
+}
+
+.offline-banner {
+  position: fixed;
+  left: 0.75rem;
+  right: 0.75rem;
+  bottom: calc(4.5rem + env(safe-area-inset-bottom));
+  z-index: 45;
+}

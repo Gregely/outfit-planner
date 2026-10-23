@@ -8,6 +8,12 @@ import { todayIn } from "@/lib/dates";
 
 const APP_KEY = "app";
 
+/**
+ * Settings rows that describe this device rather than the wardrobe (AI provider and model
+ * choices). They are not exported in backups and survive a restore.
+ */
+export const DEVICE_SETTING_KEYS = ["ai"];
+
 export function getSettings(): AppSettings {
   const row = getDb().select().from(settings).where(eq(settings.key, APP_KEY)).get();
   const parsed = appSettingsSchema.safeParse(row?.value ?? {});

@@ -5,7 +5,7 @@ import { getDays } from "@/server/services/plans";
 import { listGarments } from "@/server/services/garments";
 import { listOutfits } from "@/server/services/outfits";
 import { getSettings, today } from "@/server/services/settings";
-import { aiStatus } from "@/server/ai/client";
+import { aiUi } from "@/server/ai/client";
 import { addDays, dayName, formatDate } from "@/lib/dates";
 import { formatTemp, weatherIcon } from "@/lib/weather";
 import { LAUNDRY_STATUSES } from "@/lib/domain";
@@ -80,7 +80,8 @@ async function Home() {
   const laundry = garments.filter((g) => LAUNDRY_STATUSES.includes(g.status));
   const available = garments.filter((g) => g.available).length;
   const favourites = listOutfits({ view: "favourites" }).slice(0, 3);
-  const ai = aiStatus();
+  const ai = aiUi("daily");
+  const importAi = aiUi("import");
   const w = todayView.weather;
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
@@ -168,7 +169,7 @@ async function Home() {
 
           <section className="card p-5" aria-label="Today's plans">
             <p className="eyebrow mb-2">Today&apos;s plans</p>
-            <ActivityList date={t} activities={todayView.activities} ai={{ enabled: ai.enabled }} />
+            <ActivityList date={t} activities={todayView.activities} ai={importAi} />
           </section>
 
           {laundry.length ? (

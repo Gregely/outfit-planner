@@ -5,7 +5,7 @@ import { listOutfits, type OutfitFilters } from "@/server/services/outfits";
 import { listGarments } from "@/server/services/garments";
 import { listWearLogs } from "@/server/services/wear";
 import { today } from "@/server/services/settings";
-import { aiStatus, REASON_TEXT } from "@/server/ai/client";
+import { aiUi } from "@/server/ai/client";
 import { ButtonLink, EmptyState, PageHeader, Skeleton, cx } from "@/components/ui";
 import { OutfitCard } from "@/components/outfit-card";
 import { StylistPanel } from "@/components/stylist-panel";
@@ -51,12 +51,12 @@ async function OutfitsContent({ searchParams }: { searchParams: PageProps<"/outf
     );
   }
   const t = today();
-  const ai = aiStatus();
+  const ai = aiUi("daily");
   const outfits = view === "history" ? [] : listOutfits({ view: view as OutfitFilters["view"] });
   const logs = view === "history" ? listWearLogs({ limit: 90 }) : [];
   return (
     <>
-      <StylistPanel garments={garments.map((g) => ({ id: g.id, name: g.name, available: g.available }))} today={t} ai={{ enabled: ai.enabled, reason: ai.reason ? REASON_TEXT[ai.reason] : null }} />
+      <StylistPanel garments={garments.map((g) => ({ id: g.id, name: g.name, available: g.available }))} today={t} ai={ai} />
       <nav aria-label="Outfit collections" className="mb-5 flex gap-1 overflow-x-auto border-b border-line">
         {VIEWS.map(([v, label]) => (
           <Link

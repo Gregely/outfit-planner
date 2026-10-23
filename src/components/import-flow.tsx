@@ -1,5 +1,6 @@
 "use client";
 
+import { generatedByLabel, type AiUi } from "@/lib/ai-providers";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -25,11 +26,13 @@ type Row = {
   expanded: boolean;
 };
 
+type ImportResponse = { method: ImportMethod; proposals: ImportProposal[]; notice: string | null; generatedBy?: { providerLabel: string; model: string } | null };
+
 const EXAMPLE = `Black Nike polyester shorts for the gym and a grey cotton hoodie.
 A green floral midi dress, white leather sneakers and a black waterproof rain jacket.
 High-waisted mid-blue straight jeans and a navy wool blazer for work.`
 
-export function ImportFlow({ initialTab, ai, care }: { initialTab: "text" | "csv"; ai: { enabled: boolean; reason: string | null }; care: Record<Category, CareDefault> }) {
+export function ImportFlow({ initialTab, ai, care }: { initialTab: "text" | "csv"; ai: AiUi; care: Record<Category, CareDefault> }) {
   const router = useRouter();
   const [tab, setTab] = useState(initialTab);
   const [text, setText] = useState("");
@@ -37,12 +40,14 @@ export function ImportFlow({ initialTab, ai, care }: { initialTab: "text" | "csv
   const [useAi, setUseAi] = useState(ai.enabled);
   const [rows, setRows] = useState<Row[] | null>(null);
   const [method, setMethod] = useState<ImportMethod>("rules");
+  const [readBy, setReadBy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [done, setDone] = useState<{ created: { id: number; name: string }[]; updated: { id: number; name: string }[]; skipped: number } | null>(null);
   const { run, pending } = useMutation();
 
-  const load = (res: { method: ImportMethod; proposals: ImportProposal[]; notice: string | null }) => {
+  const load = (res: ImportResponse) => {
     setMethod(res.method);
+    setReadBy(generatedByLabel(res.generatedBy));
     setNotice(res.notice);
     setRows(
       res.proposals.map((p) => ({
@@ -66,8 +71,8 @@ export function ImportFlow({ initialTab, ai, care }: { initialTab: "text" | "csv
       async () => {
         const res =
           tab === "text"
-            ? await api<{ method: ImportMethod; proposals: ImportProposal[]; notice: string | null }>("/api/import/text", { body: { text, useAi } })
-            : await api<{ method: ImportMethod; proposals: ImportProposal[]; notice: string | null }>("/api/import/csv", { body: { csv } });
+            ? await api<ImportResponse>("/api/import/text", { body: { text, useAi } })
+            : await api<ImportResponse>("/api/import/csv", { body: { csv } });
         load(res);
         return res;
       },
@@ -156,7 +161,7 @@ export function ImportFlow({ initialTab, ai, care }: { initialTab: "text" | "csv
             <div className="flex flex-wrap items-center justify-between gap-3">
               <label className={cx("flex items-center gap-2 text-sm", !ai.enabled && "text-muted")}>
                 <input type="checkbox" className="accent-accent" checked={useAi} disabled={!ai.enabled} onChange={(e) => setUseAi(e.target.checked)} />
-                <SparkIcon size={14} /> Use Claude to read it
+                <SparkIcon size={14} /> Use {ai.label ?? "AI"} to read it
                 {!ai.enabled ? <span className="text-xs">({ai.reason}; the offline parser will be used)</span> : null}
               </label>
               <div className="flex gap-2">
@@ -207,7 +212,7 @@ export function ImportFlow({ initialTab, ai, care }: { initialTab: "text" | "csv
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <Badge tone={method === "ai" ? "accent" : "sky"}>{method === "ai" ? "Read by Claude" : method === "csv" ? "From CSV" : "Offline parser"}</Badge>
+          <Badge tone={method === "ai" ? "accent" : "sky"}>{method === "ai" ? `Read by ${readBy ?? "AI"}` : method === "csv" ? "From CSV" : "Offline parser"}</Badge>
           <span className="text-sm text-muted">
             {rows.length} garment{rows.length === 1 ? "" : "s"} found · {selected.length} selected
           </span>

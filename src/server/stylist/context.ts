@@ -47,7 +47,7 @@ export function occasionFromText(text: string): { occasion: string | null; forma
 
 /**
  * Best-effort reading of a free-text request for the rule-based stylist: occasion, tone,
- * and garments to use or avoid. Claude does this properly when it's available.
+ * and garments to use or avoid. An AI model does this properly when one is configured.
  */
 export function parsePromptHints(prompt: string, garments: Pick<Garment, "id" | "name">[]) {
   const t = ` ${prompt.toLowerCase()} `;

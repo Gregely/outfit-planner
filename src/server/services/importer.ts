@@ -4,7 +4,7 @@ import { getDb } from "@/server/db";
 import { garmentInputSchema, type GarmentInput } from "@/lib/schemas";
 import { defaultLayeringRole, type GarmentDetails } from "@/lib/domain";
 import { toColour } from "@/lib/colours";
-import { AiUnavailableError, REASON_TEXT, aiStatus, describeAiError } from "@/server/ai/client";
+import { AiUnavailableError, aiStatus, describeAiError, type GenerationMeta } from "@/server/ai/client";
 import { aiExtractGarments, UNSPECIFIED, type AiGarment } from "@/server/ai/tasks";
 import { estimateTraits } from "@/lib/garment-traits";
 import { parseWardrobeText } from "@/server/import/heuristic";
@@ -26,12 +26,12 @@ export type ImportProposal = {
   errors: string[];
 };
 
-export type ExtractResult = { method: ImportMethod; proposals: ImportProposal[]; notice: string | null };
+export type ExtractResult = { method: ImportMethod; proposals: ImportProposal[]; notice: string | null; generatedBy?: GenerationMeta | null };
 
 const known = <T extends string>(v: T): Exclude<T, typeof UNSPECIFIED> | null => (v === UNSPECIFIED ? null : (v as Exclude<T, typeof UNSPECIFIED>));
 const text = (v: string, max: number) => v.trim().slice(0, max) || null;
 
-/** Translate Claude's record (with "" / "unspecified" / 0 meaning unknown) into a garment proposal. */
+/** Translate the AI's record (with "" / "unspecified" / 0 meaning unknown) into a garment proposal. */
 export function fromAiGarment(g: AiGarment): { input: GarmentInput; assumed: string[] } {
   const assumed = new Set(g.estimated_fields.map((f) => f.toLowerCase().replace(/_/g, " ")));
   const subcategory = text(g.subcategory.toLowerCase(), 60);
@@ -98,24 +98,25 @@ export async function extractGarmentsFromText(text: string, opts: { useAi?: bool
   if (clean.length > 20_000) throw new BadRequestError("That's a lot of text – please import in smaller batches (under 20,000 characters).");
   let notice: string | null = null;
   if (opts.useAi !== false) {
-    const status = aiStatus();
+    const status = aiStatus("import");
     if (status.enabled) {
       try {
-        const garments = await aiExtractGarments(clean);
+        const { garments, meta } = await aiExtractGarments(clean);
         if (garments.length) {
           return {
             method: "ai",
             notice: null,
+            generatedBy: meta,
             proposals: finalise(garments.map((g) => ({ ...fromAiGarment(g), sourceText: g.source_text.slice(0, 400) }))),
           };
         }
-        notice = "Claude didn't find any garments in that text; tried the offline parser instead.";
+        notice = `${meta.providerLabel} didn't find any garments in that text; tried the offline parser instead.`;
       } catch (err) {
         if (!(err instanceof AiUnavailableError)) throw err;
-        notice = `Claude couldn't read it – ${describeAiError(err)}. Used the offline parser instead; please check each field.`;
+        notice = `${status.providerLabel} couldn't read it – ${describeAiError(err)}. Used the offline parser instead; please check each field.`;
       }
-    } else {
-      notice = `${capitalise(REASON_TEXT[status.reason!])}. Used the offline parser – please check each field.`;
+    } else if (status.reason !== "not_configured") {
+      notice = `${capitalise(status.message ?? "AI isn't available")}. Used the offline parser – please check each field.`;
     }
   }
   const results = parseWardrobeText(clean);

@@ -1,165 +1,78 @@
 import "server-only";
-import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
+import { CATEGORIES } from "@/lib/domain";
+import { PROVIDERS, providerKindOf, type AiUi, type TaskGroup } from "@/lib/ai-providers";
 import { getSettings } from "@/server/services/settings";
+import { secretStore } from "@/server/platform/secrets";
+import { isOnline, providerFetch } from "@/server/platform/http";
 import { describeSchemaLimits, normaliseToSchema, toWireSchema, type WireSchema } from "./wire-schema";
+import { AiUnavailableError, describeAiError, reasonText, type AiFailureReason } from "./errors";
+import { getAiConfig, modelIdSchema, providerLabel, providerSettings, saveAiConfig, targetFor, updateProvider, type AiConfig } from "./config";
+import { ADAPTERS, type ModelInfo, type ProviderContext } from "./providers";
+
+export { AiUnavailableError, REASON_TEXT, describeAiError, reasonText, type AiFailureReason } from "./errors";
 
 /**
- * Thin wrapper around the official Anthropic SDK. The API key is read on the server only.
- *
- * Calls use structured outputs (`output_config.format` with a JSON schema). We build the wire
- * schema ourselves (see wire-schema.ts) and parse the reply ourselves instead of using the SDK's
- * `parse()` helper, because that helper validates every text block regardless of `stop_reason`:
- * refusals, truncated answers and text written before a server-side fallback hop all surfaced as
- * a generic "failed to parse" error. Here each outcome is reported for what it is.
+ * Provider-independent structured calls. Whichever provider and model a task is configured to
+ * use, the request carries the same JSON schema and the answer goes through the same parsing
+ * and Zod validation here – and then through the same garment-ID, availability and rule checks
+ * in the stylist – so switching models can never bypass a hard constraint.
  */
 
-export const DEFAULT_MODEL = "claude-opus-5-5";
-type Effort = "low" | "medium" | "high" | "xhigh" | "max";
+export type GenerationMeta = { provider: string; providerLabel: string; model: string };
 
-/** Models that run safety classifiers and accept `fallbacks: "default"` (Haiku 5.5 has no server-side fallback). */
-const FALLBACK_MODELS = /^claude-(fable-5|mythos-5|opus-5|sonnet-5-5)/;
-/** Older models that reject `output_config.effort`. */
-const NO_EFFORT_MODELS = /^claude-(haiku-4-5|sonnet-4-5|opus-4-1|opus-4-0|sonnet-4-0|3)/;
+export type AiStatus = {
+  enabled: boolean;
+  reason: AiFailureReason | null;
+  /** user-facing explanation when disabled */
+  message: string | null;
+  provider: string | null;
+  providerLabel: string | null;
+  model: string | null;
+};
 
-export function aiConfig() {
-  const effort = (process.env.ANTHROPIC_EFFORT ?? "medium").trim() as Effort | "";
-  const model = process.env.ANTHROPIC_MODEL?.trim() || DEFAULT_MODEL;
+const TIMEOUT_MS = 10 * 60_000;
+
+let fetchOverride: { fetch: typeof fetch; retries: number } | null = null;
+
+/** Test hook: route every provider request through this fetch (pass null to restore). */
+export function __setAiFetch(f: typeof fetch | null, opts: { retries?: number } = {}) {
+  fetchOverride = f ? { fetch: f, retries: opts.retries ?? 0 } : null;
+}
+
+/** Can AI be used for this kind of task right now? Cheap and synchronous – safe to call while rendering. */
+export function aiStatus(group: TaskGroup | null = null, config: AiConfig = getAiConfig()): AiStatus {
+  const off = (reason: AiFailureReason, provider: string | null = null, model: string | null = null): AiStatus => {
+    const label = provider ? providerLabel(config, provider) : null;
+    return { enabled: false, reason, message: reasonText(reason, label ?? undefined), provider, providerLabel: label, model };
+  };
+  if (typeof process !== "undefined" && process.env?.AI_DISABLED === "1") return off("disabled");
+  if (!getSettings().aiEnabled) return off("disabled");
+  const target = targetFor(config, group);
+  if (!target) return off("not_configured");
+  const kind = providerKindOf(target.provider);
+  const needsKey = kind === "openai-compatible" ? providerSettings(config, target.provider).keyRequired : PROVIDERS[kind].keyRequired;
+  if (needsKey && !secretStore.has(target.provider)) return off("no_key", target.provider, target.model);
+  if (!isOnline()) return off("offline", target.provider, target.model);
+  return { enabled: true, reason: null, message: null, provider: target.provider, providerLabel: providerLabel(config, target.provider), model: target.model };
+}
+
+async function contextFor(config: AiConfig, id: string): Promise<ProviderContext> {
+  const kind = providerKindOf(id);
+  const settings = providerSettings(config, id);
   return {
-    configured: Boolean(process.env.ANTHROPIC_API_KEY?.trim() || process.env.ANTHROPIC_AUTH_TOKEN?.trim()),
-    model,
-    effort: effort && !NO_EFFORT_MODELS.test(model) ? effort : null,
-    refusalFallback: (process.env.ANTHROPIC_REFUSAL_FALLBACK ?? "default").trim() !== "off" && FALLBACK_MODELS.test(model),
+    id,
+    kind,
+    label: providerLabel(config, id),
+    settings,
+    apiKey: await secretStore.get(id),
+    bearer: "isBearerToken" in secretStore ? (secretStore as { isBearerToken(id: string): boolean }).isBearerToken(id) : false,
+    baseUrl: settings.baseUrl,
+    fetch: fetchOverride?.fetch ?? providerFetch(),
+    timeoutMs: TIMEOUT_MS,
+    retries: fetchOverride?.retries ?? 2,
   };
 }
-
-export type AiFailureReason =
-  | "not_configured"
-  | "disabled"
-  | "auth"
-  | "rate_limited"
-  | "overloaded"
-  | "network"
-  | "timeout"
-  | "malformed"
-  | "truncated"
-  | "refused"
-  | "bad_request"
-  | "error";
-
-export type AiErrorDetail = {
-  status?: number | null;
-  /** API error type, e.g. "invalid_request_error" */
-  type?: string | null;
-  /** message from the API or from our validation */
-  message?: string | null;
-  requestId?: string | null;
-  /** refusals only */
-  category?: string | null;
-};
-
-export class AiUnavailableError extends Error {
-  constructor(
-    public reason: AiFailureReason,
-    message: string,
-    public detail: AiErrorDetail = {},
-  ) {
-    super(message);
-  }
-}
-
-export const REASON_TEXT: Record<AiFailureReason, string> = {
-  not_configured: "Claude isn't configured (no ANTHROPIC_API_KEY)",
-  disabled: "Claude is switched off in Settings",
-  auth: "the Anthropic API key was rejected",
-  rate_limited: "Claude is rate-limited right now",
-  overloaded: "the Anthropic API is temporarily overloaded",
-  network: "the Anthropic API couldn't be reached",
-  timeout: "the request to Claude timed out",
-  malformed: "Claude's answer didn't match the expected format",
-  truncated: "Claude's answer was cut off before it finished",
-  refused: "Claude declined this request",
-  bad_request: "the Anthropic API rejected the request",
-  error: "the Anthropic API returned an error",
-};
-
-/**
- * One-line, user-facing description of a failure, including the specifics (API message,
- * status, request id, refusal category) so problems can be diagnosed instead of guessed.
- */
-export function describeAiError(err: unknown): string {
-  if (!(err instanceof AiUnavailableError)) return err instanceof Error ? err.message : String(err);
-  const d = err.detail;
-  const bits = [d.status ? String(d.status) : null, d.type, d.category ? `category: ${d.category}` : null].filter(Boolean).join(", ");
-  const msg = d.message && !err.message.includes(d.message) ? `: ${d.message}` : "";
-  const id = d.requestId ? ` (request ${d.requestId})` : "";
-  return `${err.message}${bits ? ` [${bits}]` : ""}${msg}${id}`;
-}
-
-export function aiStatus(): { enabled: boolean; reason: AiFailureReason | null; model: string } {
-  const cfg = aiConfig();
-  if (process.env.AI_DISABLED === "1") return { enabled: false, reason: "disabled", model: cfg.model };
-  if (!cfg.configured) return { enabled: false, reason: "not_configured", model: cfg.model };
-  if (!getSettings().aiEnabled) return { enabled: false, reason: "disabled", model: cfg.model };
-  return { enabled: true, reason: null, model: cfg.model };
-}
-
-/* ------------------------------------------------------------------ */
-/* Transport                                                           */
-/* ------------------------------------------------------------------ */
-
-/** The parts of a Messages API response we read. */
-export type AiMessage = {
-  model?: string;
-  stop_reason: string | null;
-  stop_details?: { type?: string; category?: string | null; explanation?: string | null; recommended_model?: string | null } | null;
-  content: { type: string; text?: string }[];
-  _request_id?: string | null;
-};
-
-export type AiTransport = (params: Record<string, unknown>) => Promise<AiMessage>;
-
-let injected: AiTransport | null = null;
-let sdk: Anthropic | null = null;
-
-/** Test hook: replace the network transport (pass null to restore the SDK). */
-export function __setAiTransport(transport: AiTransport | null) {
-  injected = transport;
-}
-
-/** Streams the request (recommended for long outputs) and returns the final message. */
-const sdkTransport: AiTransport = async (params) => {
-  sdk ??= new Anthropic({ maxRetries: 2, timeout: 10 * 60_000 });
-  const stream = sdk.beta.messages.stream(params as unknown as Parameters<Anthropic["beta"]["messages"]["stream"]>[0]);
-  const message = await stream.finalMessage();
-  return { ...(message as unknown as AiMessage), _request_id: stream.request_id ?? null };
-};
-
-function mapError(err: unknown): AiUnavailableError {
-  if (err instanceof AiUnavailableError) return err;
-  if (err instanceof Anthropic.APIError) {
-    const body = (err.error ?? {}) as { error?: { message?: string; type?: string } };
-    const detail: AiErrorDetail = {
-      status: err.status ?? null,
-      type: err.type ?? body.error?.type ?? null,
-      message: body.error?.message ?? err.message,
-      requestId: err.requestID ?? null,
-    };
-    if (err instanceof Anthropic.APIConnectionTimeoutError) return new AiUnavailableError("timeout", REASON_TEXT.timeout, detail);
-    if (err instanceof Anthropic.APIConnectionError) return new AiUnavailableError("network", REASON_TEXT.network, { ...detail, message: err.message });
-    if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) return new AiUnavailableError("auth", REASON_TEXT.auth, detail);
-    if (err instanceof Anthropic.RateLimitError) return new AiUnavailableError("rate_limited", REASON_TEXT.rate_limited, detail);
-    if (err instanceof Anthropic.BadRequestError || err instanceof Anthropic.NotFoundError || err instanceof Anthropic.UnprocessableEntityError)
-      return new AiUnavailableError("bad_request", REASON_TEXT.bad_request, detail);
-    if (err.status === 529 || err instanceof Anthropic.InternalServerError) return new AiUnavailableError("overloaded", REASON_TEXT.overloaded, detail);
-    return new AiUnavailableError("error", REASON_TEXT.error, detail);
-  }
-  return new AiUnavailableError("error", REASON_TEXT.error, { message: err instanceof Error ? err.message : String(err) });
-}
-
-/* ------------------------------------------------------------------ */
-/* Structured calls                                                    */
-/* ------------------------------------------------------------------ */
 
 const wireCache = new WeakMap<z.ZodType, WireSchema>();
 
@@ -169,102 +82,165 @@ function wireFor(schema: z.ZodType): WireSchema {
     wire = toWireSchema(schema);
     const limits = describeSchemaLimits(wire);
     if (limits.problems.length) {
-      // A programming error, caught by tests – never send a schema the API will refuse to compile.
-      throw new AiUnavailableError("bad_request", "Internal error: the structured-output schema exceeds the API's documented limits", {
-        message: limits.problems.join("; "),
-      });
+      // A programming error, caught by tests – never send a schema an API will refuse to compile.
+      throw new AiUnavailableError("bad_request", "Internal error: the structured-output schema exceeds documented limits", { message: limits.problems.join("; ") });
     }
     wireCache.set(schema, wire);
   }
   return wire;
 }
 
-/** Text of the answer that was actually served: after the last `fallback` hand-off block, if any. */
-export function answerText(message: AiMessage): string {
-  const lastHop = message.content.map((b) => b.type).lastIndexOf("fallback");
-  return message.content
-    .slice(lastHop + 1)
-    .filter((b) => b.type === "text" && typeof b.text === "string")
-    .map((b) => b.text)
-    .join("");
-}
-
-export async function callStructured<T>(opts: { system: string; prompt: string; schema: z.ZodType<T>; maxTokens?: number; effort?: Effort; task: string }): Promise<T> {
-  const status = aiStatus();
-  if (!status.enabled) throw new AiUnavailableError(status.reason!, REASON_TEXT[status.reason!]);
-  const cfg = aiConfig();
-  const wire = wireFor(opts.schema);
-  const params: Record<string, unknown> = {
-    model: cfg.model,
-    max_tokens: opts.maxTokens ?? 32000,
-    system: opts.system,
-    messages: [{ role: "user", content: opts.prompt }],
-    output_config: {
-      ...(cfg.effort ? { effort: opts.effort ?? cfg.effort } : {}),
-      format: { type: "json_schema", schema: wire },
-    },
-  };
-  if (cfg.refusalFallback) {
-    params.betas = ["server-side-fallback-2026-07-01"];
-    params.fallbacks = "default";
-  }
-  const transport = injected ?? sdkTransport;
-  let message: AiMessage;
-  try {
-    try {
-      message = await transport(params);
-    } catch (err) {
-      // If this model/account doesn't accept the fallback beta, retry once without it rather than failing.
-      const mapped = mapError(err);
-      if (mapped.reason === "bad_request" && params.fallbacks && /fallback/i.test(mapped.detail.message ?? "")) {
-        console.warn(`[ai] ${opts.task}: retrying without server-side fallback – ${describeAiError(mapped)}`);
-        delete params.fallbacks;
-        delete params.betas;
-        message = await transport(params);
-      } else throw mapped;
-    }
-  } catch (err) {
-    const mapped = mapError(err);
-    console.error(`[ai] ${opts.task} failed: ${describeAiError(mapped)}`);
-    throw mapped;
-  }
-  return readAnswer(message, opts.schema, wire, opts.task);
-}
-
-export function readAnswer<T>(message: AiMessage, schema: z.ZodType<T>, wire: WireSchema, task: string): T {
-  const requestId = message._request_id ?? null;
-  if (message.stop_reason === "refusal") {
-    const d = message.stop_details ?? {};
-    const err = new AiUnavailableError(
-      "refused",
-      `${REASON_TEXT.refused}${d.explanation ? ` – ${d.explanation}` : ""}`,
-      { category: d.category ?? null, requestId, message: d.recommended_model ? `recommended retry model: ${d.recommended_model}` : null },
-    );
-    console.warn(`[ai] ${task}: ${describeAiError(err)}`);
-    throw err;
-  }
-  if (message.stop_reason === "max_tokens") {
-    const err = new AiUnavailableError("truncated", REASON_TEXT.truncated, { requestId });
-    console.warn(`[ai] ${task}: ${describeAiError(err)}`);
-    throw err;
-  }
-  const text = answerText(message).trim();
-  const fail = (why: string) => {
-    const err = new AiUnavailableError("malformed", REASON_TEXT.malformed, { message: why, requestId });
-    console.error(`[ai] ${task}: ${describeAiError(err)}`);
-    return err;
-  };
-  if (!text) throw fail(`no text in the response (stop_reason: ${message.stop_reason ?? "none"})`);
+/** Parse and validate an answer exactly the same way for every provider. */
+export function parseAnswer<T>(text: string, schema: z.ZodType<T>, wire: WireSchema, label: string, requestId: string | null = null): T {
+  const fail = (why: string) => new AiUnavailableError("malformed", reasonText("malformed", label), { message: why, requestId });
+  const trimmed = text.trim();
+  if (!trimmed) throw fail("the answer was empty");
   let json: unknown;
   try {
-    json = JSON.parse(text);
+    json = JSON.parse(trimmed);
   } catch {
-    throw fail(`not valid JSON: ${text.slice(0, 120)}`);
+    throw fail(`not valid JSON: ${trimmed.slice(0, 120)}`);
   }
-  // The API may return enum values that differ only in letter case; map them to the canonical value.
+  // Enum values may differ only in letter case or separators; map them to the canonical value.
   const checked = schema.safeParse(normaliseToSchema(json, wire));
-  if (!checked.success) {
-    throw fail(checked.error.issues.slice(0, 3).map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; "));
-  }
+  if (!checked.success) throw fail(checked.error.issues.slice(0, 3).map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; "));
   return checked.data;
+}
+
+type StructuredOptions<T> = {
+  system: string;
+  prompt: string;
+  schema: z.ZodType<T>;
+  /** which configured model to use */
+  group: TaskGroup;
+  /** label for logs */
+  task: string;
+  maxTokens?: number;
+  /** override the configured target (connection tests) */
+  target?: { provider: string; model: string };
+};
+
+export async function callStructured<T>(opts: StructuredOptions<T>): Promise<{ data: T; meta: GenerationMeta }> {
+  const config = getAiConfig();
+  let target = opts.target ?? null;
+  if (!target) {
+    const status = aiStatus(opts.group, config);
+    if (!status.enabled) throw new AiUnavailableError(status.reason!, status.message!);
+    target = { provider: status.provider!, model: status.model! };
+  }
+  const ctx = await contextFor(config, target.provider);
+  const wire = wireFor(opts.schema);
+  const builtIn = ctx.kind !== "openai-compatible";
+  try {
+    const out = await ADAPTERS[ctx.kind].generate(ctx, target.model, {
+      system: opts.system,
+      prompt: opts.prompt,
+      wire,
+      schemaName: opts.task.replace(/[^a-z0-9]+/gi, "_").toLowerCase().slice(0, 60) || "answer",
+      // Custom servers often run small local models; let them use their own limit.
+      maxTokens: builtIn ? (opts.maxTokens ?? 32000) : null,
+      effort: ctx.settings.effort,
+      task: opts.task,
+    });
+    const data = parseAnswer(out.text, opts.schema, wire, ctx.label, out.requestId);
+    return { data, meta: { provider: ctx.id, providerLabel: ctx.label, model: out.model || target.model } };
+  } catch (err) {
+    const mapped =
+      err instanceof AiUnavailableError ? err : new AiUnavailableError("error", reasonText("error", ctx.label), { message: err instanceof Error ? err.message : String(err) });
+    console.error(`[ai] ${opts.task} via ${ctx.label} (${target.model}) failed: ${describeAiError(mapped)}`);
+    throw mapped;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Settings: model lists and connection tests                          */
+/* ------------------------------------------------------------------ */
+
+export async function listProviderModels(id: string): Promise<ModelInfo[]> {
+  const config = getAiConfig();
+  const ctx = await contextFor(config, id);
+  const kind = providerKindOf(id);
+  if (kind === "openai-compatible" && !ctx.settings.baseUrl) throw new AiUnavailableError("not_configured", "Add the endpoint's address first.");
+  if ((kind === "openai-compatible" ? ctx.settings.keyRequired : PROVIDERS[kind].keyRequired) && !ctx.apiKey) {
+    throw new AiUnavailableError("no_key", reasonText("no_key", ctx.label));
+  }
+  const models = (await ADAPTERS[kind].listModels(ctx)).filter((m) => modelIdSchema.safeParse(m.id).success);
+  updateProvider(id, { models: models.slice(0, 500), modelsFetchedAt: new Date().toISOString() });
+  return models;
+}
+
+const probeSchema = z.object({
+  status: z.enum(["ok"]).describe('Always "ok"'),
+  garment: z.string().describe("The garment named in the text, in a few words"),
+  category: z.enum(CATEGORIES).describe("Its category"),
+});
+
+export type ConnectionTest = { ok: boolean; message: string; steps: { label: string; ok: boolean; detail: string }[]; latencyMs: number | null };
+
+/**
+ * A real check, never a guess: lists models where the provider supports it, then asks the
+ * chosen model for a small structured answer and validates it like any other.
+ */
+export async function testProvider(id: string, model: string): Promise<ConnectionTest> {
+  const kind = providerKindOf(id);
+  const steps: ConnectionTest["steps"] = [];
+  const record = (result: ConnectionTest) => {
+    updateProvider(id, { lastTest: { ok: result.ok, at: new Date().toISOString(), message: result.message.slice(0, 600), model } });
+    return result;
+  };
+  if (!isOnline()) return record({ ok: false, message: reasonText("offline"), steps, latencyMs: null });
+
+  if (PROVIDERS[kind].canListModels) {
+    try {
+      const models = await listProviderModels(id);
+      const listed = models.some((m) => m.id === model);
+      steps.push({ label: "List models", ok: true, detail: `${models.length} model${models.length === 1 ? "" : "s"} available${listed || !models.length ? "" : ` – “${model}” isn't among them`}` });
+    } catch (err) {
+      const reason = err instanceof AiUnavailableError ? err.reason : "error";
+      steps.push({ label: "List models", ok: false, detail: describeAiError(err) });
+      // A wrong key, missing address or dead network fails everything; stop here. Some
+      // compatible servers simply don't implement /models, so carry on for those.
+      if (reason === "auth" || reason === "no_key" || reason === "not_configured" || reason === "network" || reason === "timeout") {
+        return record({ ok: false, message: describeAiError(err), steps, latencyMs: null });
+      }
+    }
+  }
+
+  const started = Date.now();
+  try {
+    const { meta } = await callStructured({
+      system: "You are a connection test for a wardrobe app. Answer in the requested JSON format.",
+      prompt: 'Connection test. Fill in the fields for this description: "black polyester running shorts".',
+      schema: probeSchema,
+      group: "daily",
+      task: "connection test",
+      maxTokens: 8000,
+      target: { provider: id, model },
+    });
+    const latencyMs = Date.now() - started;
+    steps.push({ label: "Structured answer", ok: true, detail: `${meta.model} returned a valid answer in ${(latencyMs / 1000).toFixed(1)} s` });
+    return record({ ok: true, message: `Connected – ${meta.model} returned a valid structured answer.`, steps, latencyMs });
+  } catch (err) {
+    steps.push({ label: "Structured answer", ok: false, detail: describeAiError(err) });
+    return record({ ok: false, message: describeAiError(err), steps, latencyMs: null });
+  }
+}
+
+/** Keys: write-only from the UI's point of view. */
+export async function setProviderKey(id: string, key: string | null) {
+  if (key) await secretStore.set(id, key);
+  else await secretStore.remove(id);
+  // a new key invalidates the previous test result
+  const config = getAiConfig();
+  const s = providerSettings(config, id);
+  if (s.lastTest) {
+    config.providers[id] = { ...s, lastTest: null };
+    saveAiConfig(config);
+  }
+}
+
+/** AI status in the shape the UI components take. */
+export function aiUi(group: TaskGroup | null = null): AiUi {
+  const s = aiStatus(group);
+  return { enabled: s.enabled, reason: s.enabled ? null : s.message, label: s.providerLabel, model: s.model };
 }

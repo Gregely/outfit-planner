@@ -1,5 +1,5 @@
 /**
- * Deterministic, rule-based stylist. Used when Claude is unavailable, to repair or top up
+ * Deterministic, rule-based stylist. Used when no AI model is available, to repair or top up
  * AI suggestions, and for item replacement / adjustments. Given the same inputs it always
  * returns the same outfits. No database access here: the caller builds the context.
  */

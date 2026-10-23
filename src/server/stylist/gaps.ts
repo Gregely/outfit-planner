@@ -2,15 +2,14 @@ import "server-only";
 import { isNeutral } from "@/lib/colours";
 import { slotFor } from "@/lib/domain";
 import type { Garment } from "@/server/db/schema";
-import { AiUnavailableError, REASON_TEXT, aiStatus, describeAiError } from "@/server/ai/client";
-
-const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+import { AiUnavailableError, aiStatus, describeAiError } from "@/server/ai/client";
+import { capitalise } from "@/server/ai/errors";
 import { aiGapAnalysis } from "@/server/ai/tasks";
 import { getProfile } from "@/server/services/preferences";
 import type { Profile } from "@/lib/schemas";
 import { loadGarments } from "./context";
 
-export type Gap = { piece: string; why: string; pairsWith: { id: number; name: string }[]; priority: "high" | "medium" | "low"; source: "ai" | "rules" };
+export type Gap = { piece: string; why: string; pairsWith: { id: number; name: string }[]; priority: "high" | "medium" | "low"; source: "ai" | "rules"; generatedBy?: string | null };
 
 const t = (g: Garment) => `${g.name} ${g.subcategory ?? ""} ${g.materials.join(" ")}`.toLowerCase();
 
@@ -122,12 +121,13 @@ export async function gapAnalysis(opts: { useAi?: boolean } = {}) {
   const byId = new Map(gs.map((g) => [g.id, g]));
   let notice: string | null = null;
   if (opts.useAi && gs.length >= 6) {
-    const status = aiStatus();
+    const status = aiStatus("daily");
     if (status.enabled) {
       try {
-        const out = await aiGapAnalysis(gs, profile);
+        const { gaps: out, meta } = await aiGapAnalysis(gs, profile);
         return {
           notice: null,
+          generatedBy: `${meta.providerLabel} · ${meta.model}`,
           gaps: out.slice(0, 6).map(
             (g): Gap => ({
               piece: g.piece.slice(0, 160),
@@ -141,7 +141,7 @@ export async function gapAnalysis(opts: { useAi?: boolean } = {}) {
       } catch (err) {
         notice = err instanceof AiUnavailableError ? `${capitalise(describeAiError(err))} – showing the built-in checks.` : "Showing the built-in checks.";
       }
-    } else notice = `${capitalise(REASON_TEXT[status.reason!])} – showing the built-in checks.`;
+    } else notice = `${capitalise(status.message ?? "AI isn't available")} – showing the built-in checks.`;
   }
-  return { notice, gaps: ruleGaps(gs, profile) };
+  return { notice, generatedBy: null, gaps: ruleGaps(gs, profile) };
 }

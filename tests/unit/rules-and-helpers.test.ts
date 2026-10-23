@@ -132,16 +132,16 @@ describe("offline text parsers", () => {
 
 describe("photo uploads", () => {
   const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
-  it("checks magic bytes, not the file name or MIME type", () => {
+  it("checks magic bytes, not the file name or MIME type", async () => {
     expect(sniffImage(png)).toBe("png");
     expect(sniffImage(new TextEncoder().encode("<svg onload=alert(1)>"))).toBeNull();
-    expect(() => savePhotoFile(1, new TextEncoder().encode("<html>"))).toThrow(/JPEG, PNG or WebP/);
-    expect(() => savePhotoFile(1, new Uint8Array(6 * 1024 * 1024).fill(0xff))).toThrow(/5 MB/);
+    await expect(savePhotoFile(1, new TextEncoder().encode("<html>"))).rejects.toThrow(/JPEG, PNG or WebP/);
+    await expect(savePhotoFile(1, new Uint8Array(6 * 1024 * 1024).fill(0xff))).rejects.toThrow(/5 MB/);
   });
-  it("stores under a generated name and refuses path traversal", () => {
-    const name = savePhotoFile(7, png);
+  it("stores under a generated name and refuses path traversal", async () => {
+    const name = await savePhotoFile(7, png);
     expect(name).toMatch(/^7-[0-9a-f-]{36}\.png$/);
-    expect(readPhotoFile(name).mime).toBe("image/png");
-    for (const bad of ["../../etc/passwd", "..%2F..%2Fwardrobe.db", "7-x.png", "/etc/hosts"]) expect(() => readPhotoFile(bad)).toThrow(/not found/);
+    expect((await readPhotoFile(name)).mime).toBe("image/png");
+    for (const bad of ["../../etc/passwd", "..%2F..%2Fwardrobe.db", "7-x.png", "/etc/hosts"]) await expect(readPhotoFile(bad)).rejects.toThrow(/not found/);
   });
 });

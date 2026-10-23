@@ -1,4 +1,3 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it } from "vitest";
 import { suggestOutfits, applyReplacement, replacementSuggestions, adjust, styleGarment } from "@/server/stylist";
 import { setGarmentStatus, getGarmentsByIds } from "@/server/services/garments";
@@ -10,7 +9,7 @@ import { validateOutfit } from "@/lib/outfit-rules";
 import { ruleMap } from "@/server/stylist/engine";
 import { loadGarments } from "@/server/stylist/context";
 import { slotFor } from "@/lib/domain";
-import { fakeAi, promptOf, seedSample } from "../helpers";
+import { fakeAi, httpError, NetworkDown, promptOf, seedSample } from "../helpers";
 
 function assertValid(ids: number[]) {
   const v = validateOutfit(ids, ruleMap(loadGarments()));
@@ -135,16 +134,14 @@ describe("Claude stylist with hard-constraint validation", () => {
   });
 
   it.each([
-    ["rate limit", () => new Anthropic.RateLimitError(429, undefined, "rate limited", new Headers()), /rate-limited/],
-    ["network", () => new Anthropic.APIConnectionError({ message: "offline" }), /couldn't be reached/],
-    ["unexpected SDK", () => new Anthropic.AnthropicError("socket hang up"), /returned an error: socket hang up/],
-    ["bad request", () => new Anthropic.BadRequestError(400, { type: "error", error: { type: "invalid_request_error", message: "Schema is too complex for compilation" } }, "400", new Headers({ "request-id": "req_123" })), /rejected the request.*Schema is too complex.*req_123/],
-    ["auth", () => new Anthropic.AuthenticationError(401, undefined, "bad key", new Headers()), /rejected/],
+    ["rate limit", () => httpError(429, "rate limited", "rate_limit_error"), /Claude is rate-limiting/],
+    ["network", () => { throw new NetworkDown(); }, /Claude couldn't be reached/],
+    ["unexpected", () => httpError(409, "socket hang up", "api_error"), /Claude returned an error.*socket hang up/],
+    ["bad request", () => httpError(400, "Schema is too complex for compilation"), /Claude rejected the request \[400, invalid_request_error\]: Schema is too complex.*req_test123/],
+    ["auth", () => httpError(401, "invalid x-api-key", "authentication_error"), /Claude rejected the API key/],
   ])("falls back without crashing on %s errors", async (_label, makeErr, notice) => {
     seedSample();
-    fakeAi(() => {
-      throw makeErr();
-    });
+    fakeAi(() => makeErr());
     const res = await suggestOutfits({ count: 2 });
     expect(res.source).toBe("rules");
     expect(res.notice).toMatch(notice);

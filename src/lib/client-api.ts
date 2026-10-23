@@ -1,4 +1,5 @@
 /** Browser-side JSON API helper with consistent error messages. */
+import { platform } from "./platform";
 
 export class ApiError extends Error {
   constructor(
@@ -18,9 +19,11 @@ export async function api<T = unknown>(path: string, opts: { method?: string; bo
     init.headers = { "content-type": "application/json" };
   }
   let res: Response;
+  const local = platform()?.localFetch;
   try {
-    res = await fetch(path, init);
-  } catch {
+    res = local ? await local(path, init) : await fetch(path, init);
+  } catch (err) {
+    if (local) throw new ApiError(0, `Something went wrong inside the app: ${err instanceof Error ? err.message : String(err)}`);
     throw new ApiError(0, "Can't reach the Wardrobe Studio server. Is it still running?");
   }
   const text = await res.text();

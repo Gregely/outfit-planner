@@ -99,7 +99,7 @@ export function OutfitCard({ outfit, dayDate, today, compact, onReplaceWith, hid
       </div>
       <div className="flex flex-1 flex-col gap-2 p-4 pt-3">
         <div className="flex flex-wrap items-center gap-1.5">
-          <SourceBadge source={o.source} />
+          <SourceBadge source={o.source} generatedBy={o.generatedBy} />
           {o.saved ? <Badge tone="moss">Saved</Badge> : null}
           {o.timesWorn ? <Badge>Worn {o.timesWorn}×</Badge> : null}
           {o.tags.map((t) => (
@@ -251,7 +251,7 @@ export function OutfitCard({ outfit, dayDate, today, compact, onReplaceWith, hid
 /* Dialogs                                                             */
 /* ------------------------------------------------------------------ */
 
-type Option = { garmentId: number; reason: string; source: "ai" | "rules" | "manual"; garment: GarmentView };
+type Option = { garmentId: number; reason: string; source: "ai" | "rules" | "manual"; generatedBy?: { providerLabel: string; model: string } | null; garment: GarmentView };
 
 function SwapDialog({ outfit, item, onClose, onSwapped }: { outfit: OutfitView; item: OutfitItemView | null; onClose: () => void; onSwapped: (o: OutfitView) => void }) {
   const [options, setOptions] = useState<Option[] | null>(null);
@@ -325,7 +325,7 @@ function SwapDialog({ outfit, item, onClose, onSwapped }: { outfit: OutfitView; 
               <span className="text-sm font-medium">{opt.garment.name}</span>
               <span className="mt-1 text-xs text-muted">{opt.reason}</span>
               <span className="mt-2">
-                <SourceBadge source={opt.source} />
+                <SourceBadge source={opt.source} generatedBy={opt.generatedBy} />
               </span>
             </button>
           ))}
@@ -514,7 +514,7 @@ function AdjustDialog({ open, onClose, outfit, dayDate, onUse }: { open: boolean
             ))}
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-            <Field label="Or describe it (uses Claude when available)" className="flex-1">
+            <Field label="Or describe it (uses AI when available)" className="flex-1">
               <input className="input" value={instruction} onChange={(e) => setInstruction(e.target.value)} placeholder="e.g. something warmer, keep the shoes" />
             </Field>
             <Button variant="primary" disabled={!instruction.trim()} busy={pending === "adjust"} onClick={() => go(null)}>

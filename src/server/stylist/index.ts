@@ -3,9 +3,11 @@ import { isAvailable, slotFor, type OutfitSource } from "@/lib/domain";
 import { stylistRequestSchema, type Adjustment, ADJUSTMENT_LABELS, type StylistRequest } from "@/lib/schemas";
 import { validateOutfit, type HardConstraints } from "@/lib/outfit-rules";
 import { addDays, weekDates } from "@/lib/dates";
-import type { Garment } from "@/server/db/schema";
+import type { Garment, GeneratedBy } from "@/server/db/schema";
 import { BadRequestError, ConflictError } from "@/server/errors";
-import { AiUnavailableError, REASON_TEXT, aiStatus, describeAiError } from "@/server/ai/client";
+import { AiUnavailableError, aiStatus, describeAiError, type GenerationMeta } from "@/server/ai/client";
+import { capitalise } from "@/server/ai/errors";
+import type { TaskGroup } from "@/lib/ai-providers";
 import { aiAdjustOutfit, aiPlanWeek, aiReplaceGarment, aiSuggestOutfits, type StylistPromptParts } from "@/server/ai/tasks";
 import { getSettings, getCareDefaults, today } from "@/server/services/settings";
 import { careFor } from "@/server/services/garments";
@@ -21,22 +23,23 @@ export type StylistResult = {
   notice: string | null;
   /** AI suggestions that failed validation and were discarded */
   rejected: number;
+  /** the AI model whose suggestions were used, if any */
+  generatedBy: GeneratedBy | null;
 };
 
-type Draft = { garmentIds: number[]; name: string; explanation: string; source: OutfitSource; warnings: string[] };
-
-const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+type Draft = { garmentIds: number[]; name: string; explanation: string; source: OutfitSource; warnings: string[]; generatedBy: GeneratedBy | null };
 
 function aiNotice(err: unknown): string {
   if (err instanceof AiUnavailableError) return `${capitalise(describeAiError(err))} – showing rule-based suggestions instead.`;
-  return "Claude couldn't help this time – showing rule-based suggestions instead.";
+  return "The AI stylist couldn't help this time – showing rule-based suggestions instead.";
 }
 
-function wantsAi(useAi: boolean | undefined): { ok: boolean; notice: string | null } {
-  if (useAi === false) return { ok: false, notice: null };
-  const s = aiStatus();
-  if (s.enabled) return { ok: true, notice: null };
-  return { ok: false, notice: s.reason === "not_configured" ? null : `${capitalise(REASON_TEXT[s.reason!])} – showing rule-based suggestions.` };
+function wantsAi(useAi: boolean | undefined, group: TaskGroup): { ok: boolean; notice: string | null; label: string } {
+  const s = aiStatus(group);
+  const label = s.providerLabel ?? "The AI stylist";
+  if (useAi === false) return { ok: false, notice: null, label };
+  if (s.enabled) return { ok: true, notice: null, label };
+  return { ok: false, notice: s.reason === "not_configured" ? null : `${capitalise(s.message ?? "AI isn't available")} – showing rule-based suggestions.`, label };
 }
 
 function recentLines(sc: StylistContext): string[] {
@@ -79,6 +82,7 @@ function persist(drafts: Draft[], sc: StylistContext, request: string): OutfitVi
       source: d.source,
       explanation: d.explanation,
       warnings: d.warnings,
+      generatedBy: d.generatedBy,
       saved: false,
       context: {
         date: sc.engine.date,
@@ -91,7 +95,12 @@ function persist(drafts: Draft[], sc: StylistContext, request: string): OutfitVi
   );
 }
 
-function validateAiOutfits(raw: { name: string; garment_ids: number[]; explanation: string }[], sc: StylistContext, constraints: HardConstraints) {
+/**
+ * Every AI answer passes through here, whichever provider produced it: unknown or unavailable
+ * garments, broken composition, exclusions, "never combine" rules and laundry limits are all
+ * checked by the app, and anything that fails is discarded.
+ */
+function validateAiOutfits(raw: { name: string; garment_ids: number[]; explanation: string }[], sc: StylistContext, constraints: HardConstraints, meta: GenerationMeta) {
   const byId = ruleMap(sc.garments);
   const valid: Draft[] = [];
   const errors: string[] = [];
@@ -115,6 +124,7 @@ function validateAiOutfits(raw: { name: string; garment_ids: number[]; explanati
       explanation: o.explanation.trim().slice(0, 4000),
       source: "ai",
       warnings: scoreOutfit(gs, sc.engine).warnings,
+      generatedBy: meta,
     });
   }
   return { valid, errors };
@@ -127,7 +137,7 @@ function ruleDrafts(sc: StylistContext, count: number, avoid: Draft[] = []): Dra
     .slice(0, count)
     .map((c) => {
       const gs = c.garmentIds.map((id) => sc.garments.find((g) => g.id === id)!);
-      return { garmentIds: c.garmentIds, name: nameFor(gs, sc.engine.occasion), explanation: describe(gs, c.reasons), source: "rules", warnings: c.warnings };
+      return { garmentIds: c.garmentIds, name: nameFor(gs, sc.engine.occasion), explanation: describe(gs, c.reasons), source: "rules", warnings: c.warnings, generatedBy: null };
     });
 }
 
@@ -140,6 +150,10 @@ function missingBasics(sc: StylistContext): string | null {
   if (!available.some((g) => ["top", "onepiece"].includes(slotFor(g)) || g.category === "knitwear")) missing.push("a top");
   if (missing.length === 0) return null;
   return `To build a full outfit the wardrobe needs available ${missing.join(", ")}. Add garments or bring some back from the laundry.`;
+}
+
+function aiModel(drafts: Draft[]): GeneratedBy | null {
+  return drafts.find((d) => d.generatedBy)?.generatedBy ?? null;
 }
 
 function summarise(drafts: Draft[]): OutfitSource | "mixed" {
@@ -162,23 +176,25 @@ export async function suggestOutfits(raw: StylistRequest): Promise<StylistResult
     if (!g) throw new BadRequestError("A requested garment no longer exists.");
     if (!isAvailable(g.status)) throw new BadRequestError(`${g.name} isn't available right now, so it can't be styled.`);
   }
-  const ai = wantsAi(req.useAi);
+  const ai = wantsAi(req.useAi, "daily");
   let notice = ai.notice;
   let drafts: Draft[] = [];
   let rejected = 0;
   if (ai.ok) {
     try {
       const parts = promptParts(sc, req.prompt);
-      const first = validateAiOutfits(await aiSuggestOutfits(parts, req.count), sc, sc.engine.constraints);
+      const firstAnswer = await aiSuggestOutfits(parts, req.count);
+      const first = validateAiOutfits(firstAnswer.outfits, sc, sc.engine.constraints, firstAnswer.meta);
       drafts = first.valid;
       rejected += first.errors.length;
       if (drafts.length < req.count && first.errors.length) {
-        const second = validateAiOutfits(await aiSuggestOutfits(parts, req.count - drafts.length, first.errors.join("\n")), sc, sc.engine.constraints);
+        const secondAnswer = await aiSuggestOutfits(parts, req.count - drafts.length, first.errors.join("\n"));
+        const second = validateAiOutfits(secondAnswer.outfits, sc, sc.engine.constraints, secondAnswer.meta);
         const keys = new Set(drafts.map((d) => d.garmentIds.slice().sort().join(",")));
         drafts.push(...second.valid.filter((d) => !keys.has(d.garmentIds.slice().sort().join(","))));
         rejected += second.errors.length;
       }
-      if (rejected && drafts.length < req.count) notice = "Some of Claude's ideas broke your wardrobe rules and were replaced with rule-based picks.";
+      if (rejected && drafts.length < req.count) notice = `Some of ${firstAnswer.meta.providerLabel}'s ideas broke your wardrobe rules and were replaced with rule-based picks.`;
     } catch (err) {
       notice = aiNotice(err);
     }
@@ -189,7 +205,8 @@ export async function suggestOutfits(raw: StylistRequest): Promise<StylistResult
       "No outfit satisfies every rule with what's available. Try removing an exclusion, relaxing a 'never combine' rule, or bringing garments back from the laundry.",
     );
   }
-  return { outfits: persist(drafts.slice(0, req.count), sc, req.prompt), source: summarise(drafts), notice, rejected };
+  const used = drafts.slice(0, req.count);
+  return { outfits: persist(used, sc, req.prompt), source: summarise(used), notice, rejected, generatedBy: aiModel(used) };
 }
 
 export async function styleGarment(garmentId: number, useAi = true) {
@@ -234,7 +251,7 @@ function exhaustedSet(state: WeekState) {
   return new Set([...state.remaining.entries()].filter(([, n]) => n <= 0).map(([id]) => id));
 }
 
-export type WeekResult = { planned: string[]; skipped: { date: string; reason: string }[]; source: OutfitSource | "mixed"; notice: string | null };
+export type WeekResult = { planned: string[]; skipped: { date: string; reason: string }[]; source: OutfitSource | "mixed"; notice: string | null; generatedBy: GeneratedBy | null };
 
 export async function planWeek(start: string, opts: { useAi?: boolean; request?: string } = {}): Promise<WeekResult> {
   const dates = weekDates(start);
@@ -248,7 +265,7 @@ export async function planWeek(start: string, opts: { useAi?: boolean; request?:
     else if (d.plan?.locked && d.outfit) skipped.push({ date: d.date, reason: "locked" });
     else toPlan.push(d);
   }
-  if (toPlan.length === 0) return { planned: [], skipped, source: "rules", notice: "Nothing to plan – every day this week is locked, worn or past." };
+  if (toPlan.length === 0) return { planned: [], skipped, source: "rules", notice: "Nothing to plan – every day this week is locked, worn or past.", generatedBy: null };
 
   const probe = await buildContext({ date: toPlan[0].date, day: toPlan[0], prompt: opts.request });
   const missing = missingBasics(probe);
@@ -258,9 +275,10 @@ export async function planWeek(start: string, opts: { useAi?: boolean; request?:
   const fixed = days.filter((d) => !toPlan.includes(d) && d.date >= t && d.outfit);
   for (const d of fixed) consume(state, outfitGarmentIds(d.outfit!.id), d.date);
 
-  const ai = wantsAi(opts.useAi);
+  const ai = wantsAi(opts.useAi, "weekly");
   let notice = ai.notice;
   const aiByDate = new Map<string, { name: string; garment_ids: number[]; explanation: string }>();
+  let weekMeta: GenerationMeta | null = null;
   if (ai.ok) {
     try {
       const parts = promptParts(probe, opts.request ?? "");
@@ -270,7 +288,8 @@ export async function planWeek(start: string, opts: { useAi?: boolean; request?:
         days: toPlan,
         fixed: fixed.map((d) => ({ date: d.date, garments: outfitGarmentIds(d.outfit!.id).map((id) => byId.get(id)).filter((g): g is Garment => Boolean(g)) })),
       });
-      for (const o of out) aiByDate.set(o.date, o);
+      weekMeta = out.meta;
+      for (const o of out.days) aiByDate.set(o.date, o);
     } catch (err) {
       notice = aiNotice(err);
     }
@@ -290,8 +309,8 @@ export async function planWeek(start: string, opts: { useAi?: boolean; request?:
     });
     let draft: Draft | undefined;
     const proposal = aiByDate.get(day.date);
-    if (proposal) {
-      const { valid, errors } = validateAiOutfits([proposal], sc, sc.engine.constraints);
+    if (proposal && weekMeta) {
+      const { valid, errors } = validateAiOutfits([proposal], sc, sc.engine.constraints, weekMeta);
       draft = valid[0];
       rejected += errors.length;
     }
@@ -309,12 +328,13 @@ export async function planWeek(start: string, opts: { useAi?: boolean; request?:
     consume(state, draft.garmentIds, day.date);
     drafts.push({ date: day.date, draft, sc });
   }
-  if (rejected && ai.ok) notice = `${rejected} of Claude's days broke a rule or the laundry schedule and were re-planned with the rule-based stylist.`;
+  if (rejected && ai.ok) notice = `${rejected} of ${ai.label}'s days broke a rule or the laundry schedule and were re-planned with the rule-based stylist.`;
   for (const { date, draft, sc } of drafts) {
     const [outfit] = persist([draft], sc, opts.request ?? "");
     setDayOutfit(date, outfit.id, { copySaved: false });
   }
-  return { planned: drafts.map((d) => d.date), skipped, source: summarise(drafts.map((d) => d.draft)), notice };
+  const used = drafts.map((d) => d.draft);
+  return { planned: drafts.map((d) => d.date), skipped, source: summarise(used), notice, generatedBy: aiModel(used) };
 }
 
 /** Regenerate a single day; other days and locked selections are untouched. */
@@ -331,12 +351,13 @@ export async function regenerateDay(date: string, opts: { useAi?: boolean; reque
   if (previous.length) sc.engine.recentOutfits.push(previous);
   const missing = missingBasics(sc);
   if (missing) throw new BadRequestError(missing);
-  const ai = wantsAi(opts.useAi);
+  const ai = wantsAi(opts.useAi, "daily");
   let notice = ai.notice;
   let draft: Draft | undefined;
   if (ai.ok) {
     try {
-      const { valid } = validateAiOutfits(await aiSuggestOutfits(promptParts(sc, opts.request ?? "A fresh outfit for this day."), 2), sc, sc.engine.constraints);
+      const answer = await aiSuggestOutfits(promptParts(sc, opts.request ?? "A fresh outfit for this day."), 2);
+      const { valid } = validateAiOutfits(answer.outfits, sc, sc.engine.constraints, answer.meta);
       draft = valid.find((d) => d.garmentIds.slice().sort().join(",") !== previous.slice().sort().join(","));
     } catch (err) {
       notice = aiNotice(err);
@@ -358,7 +379,7 @@ function outfitDate(outfitId: number) {
   return o.context?.date && o.context.date >= today() ? o.context.date : today();
 }
 
-export type ReplacementOption = { garmentId: number; reason: string; source: OutfitSource };
+export type ReplacementOption = { garmentId: number; reason: string; source: OutfitSource; generatedBy: GeneratedBy | null };
 
 /** Suggest replacements for one garment. Nothing changes until one is applied. */
 export async function replacementSuggestions(outfitId: number, garmentId: number, opts: { useAi?: boolean; instruction?: string } = {}) {
@@ -370,19 +391,19 @@ export async function replacementSuggestions(outfitId: number, garmentId: number
   if (!target) throw new BadRequestError("That garment no longer exists.");
   const byId = ruleMap(sc.garments);
   const options: ReplacementOption[] = [];
-  const ai = wantsAi(opts.useAi);
+  const ai = wantsAi(opts.useAi, "daily");
   let notice = ai.notice;
   if (ai.ok) {
     try {
       const current = currentIds.map((id) => sc.garments.find((g) => g.id === id)).filter((g): g is Garment => Boolean(g));
-      const alts = await aiReplaceGarment({ ...promptParts(sc, ""), current, target, instruction: opts.instruction ?? "" });
-      for (const a of alts) {
+      const answer = await aiReplaceGarment({ ...promptParts(sc, ""), current, target, instruction: opts.instruction ?? "" });
+      for (const a of answer.alternatives) {
         const alt = byId.get(a.garment_id);
         if (!alt || !isAvailable(alt.status) || currentIds.includes(a.garment_id)) continue;
         const ids = currentIds.map((id) => (id === garmentId ? a.garment_id : id));
         const v = validateOutfit(ids, byId, { ...sc.engine.constraints, requireAvailable: false });
         if (!v.ok) continue;
-        options.push({ garmentId: a.garment_id, reason: a.reason.slice(0, 400), source: "ai" });
+        options.push({ garmentId: a.garment_id, reason: a.reason.slice(0, 400), source: "ai", generatedBy: answer.meta });
       }
     } catch (err) {
       notice = aiNotice(err).replace("suggestions", "alternatives");
@@ -392,7 +413,7 @@ export async function replacementSuggestions(outfitId: number, garmentId: number
     if (options.length >= 3) break;
     const newId = c.garmentIds.find((id) => !currentIds.includes(id));
     if (!newId || options.some((o) => o.garmentId === newId)) continue;
-    options.push({ garmentId: newId, reason: c.reasons.slice(0, 2).join(" "), source: "rules" });
+    options.push({ garmentId: newId, reason: c.reasons.slice(0, 2).join(" "), source: "rules", generatedBy: null });
   }
   return { options: options.slice(0, 3), notice };
 }
@@ -423,13 +444,13 @@ export async function adjust(outfitId: number, adjustment: Adjustment | null, op
   const sc = await buildContext({ date: outfitDate(outfitId) });
   sc.engine.constraints.requireIds = [];
   const instruction = [adjustment ? `Make it ${ADJUSTMENT_LABELS[adjustment].toLowerCase()}.` : "", opts.instruction ?? ""].filter(Boolean).join(" ");
-  const ai = wantsAi(opts.useAi);
+  const ai = wantsAi(opts.useAi, "daily");
   let notice = ai.notice;
   let draft: Draft | null = null;
   if (ai.ok) {
     try {
       const current = currentIds.map((id) => sc.garments.find((g) => g.id === id)).filter((g): g is Garment => Boolean(g));
-      const out = await aiAdjustOutfit({ ...promptParts(sc, ""), current, instruction });
+      const { outfit: out, meta } = await aiAdjustOutfit({ ...promptParts(sc, ""), current, instruction });
       const byId = ruleMap(sc.garments);
       const fresh = out.garment_ids.filter((id) => !currentIds.includes(id));
       const v = validateOutfit(out.garment_ids, byId, { ...sc.engine.constraints, requireAvailable: false });
@@ -437,7 +458,7 @@ export async function adjust(outfitId: number, adjustment: Adjustment | null, op
       const changed = fresh.length > 0 || currentIds.some((id) => !out.garment_ids.includes(id));
       if (v.ok && freshOk && changed) {
         const gs = [...new Set(out.garment_ids)].map((id) => sc.garments.find((g) => g.id === id)!);
-        draft = { garmentIds: gs.map((g) => g.id), name: out.name.slice(0, 120), explanation: out.explanation.slice(0, 4000), source: "ai", warnings: scoreOutfit(gs, sc.engine).warnings };
+        draft = { garmentIds: gs.map((g) => g.id), name: out.name.slice(0, 120), explanation: out.explanation.slice(0, 4000), source: "ai", warnings: scoreOutfit(gs, sc.engine).warnings, generatedBy: meta };
       }
     } catch (err) {
       notice = aiNotice(err);
@@ -447,14 +468,14 @@ export async function adjust(outfitId: number, adjustment: Adjustment | null, op
     const c = adjustOutfit(sc.engine, currentIds, adjustment);
     if (c) {
       const gs = c.garmentIds.map((id) => sc.garments.find((g) => g.id === id)!);
-      draft = { garmentIds: c.garmentIds, name: `${original.name} · ${ADJUSTMENT_LABELS[adjustment].toLowerCase()}`, explanation: describe(gs, c.reasons), source: "rules", warnings: c.warnings };
+      draft = { garmentIds: c.garmentIds, name: `${original.name} · ${ADJUSTMENT_LABELS[adjustment].toLowerCase()}`, explanation: describe(gs, c.reasons), source: "rules", warnings: c.warnings, generatedBy: null };
     }
   }
   if (!draft) {
     throw new BadRequestError(
       adjustment
         ? `Couldn't find a way to make this ${ADJUSTMENT_LABELS[adjustment].toLowerCase()} with what's available.`
-        : "Claude isn't available, so free-text adjustments can't be made right now. Try one of the quick adjustments.",
+        : `${ai.label} isn't available, so free-text adjustments can't be made right now. Try one of the quick adjustments.`,
     );
   }
   const created = createOutfit({
@@ -463,6 +484,7 @@ export async function adjust(outfitId: number, adjustment: Adjustment | null, op
     source: draft.source,
     explanation: draft.explanation,
     warnings: draft.warnings,
+    generatedBy: draft.generatedBy,
     saved: false,
     basedOnOutfitId: original.id,
     context: { ...original.context, request: instruction },

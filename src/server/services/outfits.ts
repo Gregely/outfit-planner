@@ -12,6 +12,7 @@ import {
   type Outfit,
   type OutfitContext,
   type OutfitItem,
+  type GeneratedBy,
 } from "@/server/db/schema";
 import { outfitPatchSchema } from "@/lib/schemas";
 import { slotFor, type OutfitSource } from "@/lib/domain";
@@ -49,6 +50,7 @@ export type NewOutfit = {
   saved?: boolean;
   favourite?: boolean;
   basedOnOutfitId?: number | null;
+  generatedBy?: GeneratedBy | null;
 };
 
 function itemRows(outfitId: number, gs: Garment[]) {
@@ -88,6 +90,7 @@ export function createOutfit(input: NewOutfit): OutfitView {
         saved: input.saved ?? false,
         favourite: input.favourite ?? false,
         basedOnOutfitId: input.basedOnOutfitId ?? null,
+        generatedBy: input.generatedBy ?? null,
         createdAt: ts,
         updatedAt: ts,
       })
@@ -249,6 +252,7 @@ export function duplicateOutfit(id: number, opts: { saved?: boolean; name?: stri
     tags: o.tags,
     saved: opts.saved ?? true,
     basedOnOutfitId: o.id,
+    generatedBy: o.generatedBy,
   });
 }
 

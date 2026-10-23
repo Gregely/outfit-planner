@@ -9,7 +9,7 @@ import { Badge, Button, Field, Notice } from "./ui";
 import { Modal, useMutation } from "./feedback-ui";
 import { CloseIcon, PlusIcon, SparkIcon } from "./icons";
 
-export function ActivityList({ date, activities, ai }: { date: string; activities: Activity[]; ai: { enabled: boolean } }) {
+export function ActivityList({ date, activities, ai }: { date: string; activities: Activity[]; ai: { enabled: boolean; label?: string | null } }) {
   const { run } = useMutation();
   const [adding, setAdding] = useState(false);
   const [describing, setDescribing] = useState(false);
@@ -123,7 +123,7 @@ function AddActivityDialog({ date, open, onClose }: { date: string; open: boolea
   );
 }
 
-function DescribeDayDialog({ date, open, onClose, ai }: { date: string; open: boolean; onClose: () => void; ai: { enabled: boolean } }) {
+function DescribeDayDialog({ date, open, onClose, ai }: { date: string; open: boolean; onClose: () => void; ai: { enabled: boolean; label?: string | null } }) {
   const [text, setText] = useState("");
   const [parsed, setParsed] = useState<{ activities: ActivityInput[]; notice: string | null; method: string } | null>(null);
   const { run, pending } = useMutation();
@@ -180,7 +180,7 @@ function DescribeDayDialog({ date, open, onClose, ai }: { date: string; open: bo
       }
     >
       {!parsed ? (
-        <Field label="Your plans" hint={ai.enabled ? "Claude turns this into activities you can check before adding." : "The offline parser picks out times and places – check the result before adding."}>
+        <Field label="Your plans" hint={ai.enabled ? `${ai.label ?? "AI"} turns this into activities you can check before adding.` : "The offline parser picks out times and places – check the result before adding."}>
           <textarea
             className="input min-h-28 font-serif"
             value={text}
