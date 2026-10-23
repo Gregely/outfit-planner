@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { GarmentView } from "@/server/services/garments";
 import type { OutfitView } from "@/server/services/outfits";
 import { api } from "@/lib/client-api";
+import { platform } from "@/lib/platform";
 import { Button, ButtonLink, Notice, Spinner } from "./ui";
 import { Modal, useConfirm, useMutation } from "./feedback-ui";
 import { CopyIcon, EditIcon, RefreshIcon, SparkIcon, TrashIcon, UploadIcon } from "./icons";
@@ -17,6 +18,13 @@ export function GarmentActions({ garment }: { garment: GarmentView }) {
   const file = useRef<HTMLInputElement>(null);
   const [styled, setStyled] = useState<{ outfits: OutfitView[]; notice: string | null } | null>(null);
   const [styling, setStyling] = useState(false);
+  // On Android: the system camera and the Photo Picker instead of a file dialog.
+  const pickPhoto = platform()?.pickPhoto;
+  const upload = async (f: File) => {
+    const form = new FormData();
+    form.set("photo", f);
+    await run("upload", () => api(`/api/garments/${garment.id}/photo`, { form }), { success: "Photo added" });
+  };
   return (
     <div className="mt-4 flex flex-wrap gap-2">
       <Button
@@ -57,15 +65,29 @@ export function GarmentActions({ garment }: { garment: GarmentView }) {
         onChange={async (e) => {
           const f = e.target.files?.[0];
           e.target.value = "";
-          if (!f) return;
-          const form = new FormData();
-          form.set("photo", f);
-          await run("photo", () => api(`/api/garments/${garment.id}/photo`, { form }), { success: "Photo added" });
+          if (f) await upload(f);
         }}
       />
-      <Button busy={pending === "photo"} onClick={() => file.current?.click()}>
-        <UploadIcon size={15} /> {garment.photoFile ? "Replace photo" : "Add photo"}
-      </Button>
+      {pickPhoto ? (
+        <>
+          <Button busy={pending === "photo"} onClick={() => run("photo", async () => {
+            const f = await pickPhoto("camera");
+            if (f) await upload(f);
+          }, { refresh: false })}>
+            <UploadIcon size={15} /> Take photo
+          </Button>
+          <Button onClick={() => run("photo", async () => {
+            const f = await pickPhoto("gallery");
+            if (f) await upload(f);
+          }, { refresh: false })}>
+            From gallery
+          </Button>
+        </>
+      ) : (
+        <Button busy={pending === "photo"} onClick={() => file.current?.click()}>
+          <UploadIcon size={15} /> {garment.photoFile ? "Replace photo" : "Add photo"}
+        </Button>
+      )}
       {garment.photoFile ? (
         <Button variant="ghost" onClick={() => run("unphoto", () => api(`/api/garments/${garment.id}/photo`, { method: "DELETE" }), { success: "Photo removed" })}>
           Remove photo

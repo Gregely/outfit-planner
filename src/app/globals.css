@@ -1,4 +1,6 @@
 @import "tailwindcss";
+/* Scan all app source explicitly – the Android build (mobile/vite.config.mts) runs from another root. */
+@source "..";
 @import "@fontsource-variable/fraunces/opsz.css";
 @import "@fontsource-variable/inter/index.css";
 
@@ -71,7 +73,7 @@ h3,
     @apply rounded-[var(--radius-card)] border border-line bg-card shadow-[var(--shadow-card)];
   }
   .input {
-    @apply w-full rounded-lg border border-line-strong bg-white/70 px-3 py-2 text-sm text-ink placeholder:text-muted/70 transition focus:border-accent focus:bg-white focus:outline-none focus:ring-2 focus:ring-accent/15 disabled:opacity-60;
+    @apply w-full rounded-lg border border-line-strong bg-white/70 px-3 py-2 text-sm text-ink placeholder:text-muted/70 transition focus:border-accent focus:bg-white focus:outline-none focus:ring-2 focus:ring-accent/15 disabled:opacity-60 pointer-coarse:min-h-11 pointer-coarse:text-base;
   }
   .link {
     @apply underline decoration-line-strong underline-offset-4 hover:decoration-accent;

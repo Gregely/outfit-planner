@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  HTTPS everywhere by default, trusting only the system's certificate authorities.
+  Plain http:// is allowed so that a self-hosted, OpenAI-compatible model server on your own
+  network (e.g. Ollama at http://192.168.1.20:11434) can be used; the app warns in Settings when
+  an http:// address isn't on a local network. Android can't scope this to private addresses.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

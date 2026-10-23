@@ -12,6 +12,15 @@ import { AlertIcon, CheckIcon, PlusIcon, RefreshIcon, SparkIcon, TrashIcon } fro
 type Target = { provider: string; model: string };
 type TestResult = { ok: boolean; message: string; steps: { label: string; ok: boolean; detail: string }[]; latencyMs: number | null };
 
+/** A timestamp in the viewer's locale; the server renders its own, so allow the difference. */
+function When({ iso }: { iso: string }) {
+  return (
+    <time dateTime={iso} suppressHydrationWarning>
+      {new Date(iso).toLocaleString()}
+    </time>
+  );
+}
+
 const toneOf = (t: ProviderView["status"]["tone"]) => (t === "ok" ? "moss" : t === "warn" ? "gold" : "neutral");
 
 function defaultModel(p: ProviderView | undefined): string {
@@ -296,7 +305,7 @@ function ProviderCard({ p, active, onActivate }: { p: ProviderView; active: bool
             </Button>
           </div>
           <p className="text-xs text-muted">
-            {p.modelsFetchedAt ? `Live list fetched ${new Date(p.modelsFetchedAt).toLocaleString()}.` : d.catalogue.length ? `Suggestions from ${d.label}'s documentation (checked ${CATALOGUE_CHECKED}); refresh to see what your key can use.` : "Refresh to load the models this server offers, or type an ID."}
+            {p.modelsFetchedAt ? <>Live list fetched <When iso={p.modelsFetchedAt} />.</> : d.catalogue.length ? `Suggestions from ${d.label}'s documentation (checked ${CATALOGUE_CHECKED}); refresh to see what your key can use.` : "Refresh to load the models this server offers, or type an ID."}
           </p>
           <div className="flex flex-wrap gap-2">
             <Button
@@ -331,7 +340,7 @@ function ProviderCard({ p, active, onActivate }: { p: ProviderView; active: bool
             </div>
           ) : p.lastTest ? (
             <p className="text-xs text-muted">
-              Last test {new Date(p.lastTest.at).toLocaleString()}: {p.lastTest.ok ? "passed" : "failed"}
+              Last test <When iso={p.lastTest.at} />: {p.lastTest.ok ? "passed" : "failed"}
               {p.lastTest.model ? ` (${p.lastTest.model})` : ""}. {p.lastTest.ok ? "" : p.lastTest.message}
             </p>
           ) : null}
@@ -407,6 +416,7 @@ function AddEndpoint() {
 export function AiProvidersSettings({ view }: { view: AiSettingsView }) {
   const { run, pending } = useMutation();
   const native = isNativeApp();
+  const [enabled, setEnabled] = useState(view.enabled);
   const setTarget = (body: Record<string, unknown>, success: string) => run("target", () => api("/api/ai", { method: "PUT", body }), { success });
   const usable = view.providers.filter((p) => p.status.tone !== "off");
   return (
@@ -416,8 +426,13 @@ export function AiProvidersSettings({ view }: { view: AiSettingsView }) {
           <input
             type="checkbox"
             className="size-4 accent-accent"
-            checked={view.enabled}
-            onChange={(e) => run("toggle", () => api("/api/settings", { method: "PUT", body: { aiEnabled: e.target.checked } }), { success: e.target.checked ? "AI switched on" : "AI switched off – using the built-in stylist" })}
+            checked={enabled}
+            onChange={async (e) => {
+              const on = e.target.checked;
+              setEnabled(on); // respond immediately; revert if saving fails
+              const r = await run("toggle", () => api("/api/settings", { method: "PUT", body: { aiEnabled: on } }), { success: on ? "AI switched on" : "AI switched off – using the built-in stylist" });
+              if (!r) setEnabled(!on);
+            }}
           />
           Use AI for suggestions, imports and planning
         </label>
@@ -467,7 +482,7 @@ export function AiProvidersSettings({ view }: { view: AiSettingsView }) {
           <strong className="font-medium text-ink-soft">Keys:</strong> {view.storage.description}. They are never included in backups, exports or logs, and never shown again after saving.
         </p>
         <p>
-          <strong className="font-medium text-ink-soft">What&apos;s sent:</strong> when AI is used, the chosen provider receives your available garments (names, types, colours, materials), your style profile and rules, the day&apos;s weather and plans, and your request – nothing else.
+          <strong className="font-medium text-ink-soft">What&apos;s sent:</strong> when AI is used, the chosen provider receives your available garments (names, types, colours, materials), your style profile, rules and recent feedback, what you wore recently (to avoid repeats), the day&apos;s weather and plans, and your request. Photos are never sent.
           {native ? " Requests go straight from this phone to the provider." : " Requests go from this computer's server straight to the provider."}
         </p>
         <p>

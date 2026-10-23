@@ -8,7 +8,6 @@ import { App as CapApp } from "@capacitor/app";
 import { Camera, MediaTypeSelection } from "@capacitor/camera";
 import { Network } from "@capacitor/network";
 import { SplashScreen } from "@capacitor/splash-screen";
-import { StatusBar, Style } from "@capacitor/status-bar";
 import { Keyboard, KeyboardResize } from "@capacitor/keyboard";
 import type { PlatformBridge } from "@/lib/platform";
 import { bytesToBase64 } from "@/lib/base64";
@@ -20,7 +19,7 @@ import { initNetwork, setOnline } from "./platform/network";
 import { isNative } from "./platform/device";
 import { App } from "./runtime/app";
 import { localFetch } from "./runtime/local-api";
-import { onAfterWork } from "./runtime/hooks";
+import { onAfterWork, setPersist } from "./runtime/hooks";
 import { navigate } from "./runtime/router-store";
 import { OfflineBanner } from "./runtime/offline-banner";
 
@@ -167,7 +166,6 @@ function interceptLinks() {
 
 async function setupNative() {
   document.documentElement.classList.add("native-app");
-  await StatusBar.setStyle({ style: Style.Light }).catch(() => {});
   await Keyboard.setResizeMode({ mode: KeyboardResize.Native }).catch(() => {});
   CapApp.addListener("backButton", ({ canGoBack }) => {
     // Close the top-most dialog first, like the Escape key does.
@@ -208,6 +206,7 @@ async function start() {
   }
   (globalThis as { __wardrobePlatform?: PlatformBridge }).__wardrobePlatform = bridge;
   onAfterWork(scheduleSave);
+  setPersist(flushSave);
   addEventListener("pagehide", () => void flushSave());
   document.addEventListener("visibilitychange", () => document.visibilityState === "hidden" && void flushSave());
   interceptLinks();

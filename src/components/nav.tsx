@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarIcon, CogIcon, HangerIcon, HomeIcon, SparkIcon, UserIcon, WashIcon } from "./icons";
+import { useEffect, useRef, useState } from "react";
+import { CalendarIcon, CogIcon, HangerIcon, HomeIcon, MenuDotsIcon, SparkIcon, UserIcon, WashIcon } from "./icons";
 import { cx } from "./ui";
 
 const ITEMS = [
@@ -14,6 +15,10 @@ const ITEMS = [
   { href: "/profile", label: "Style profile", icon: UserIcon },
   { href: "/settings", label: "Settings", icon: CogIcon },
 ];
+
+/** On phones the first four are tabs; the rest live behind "More". */
+const PRIMARY = ITEMS.slice(0, 4);
+const SECONDARY = ITEMS.slice(4);
 
 function isActive(path: string, href: string) {
   return href === "/" ? path === "/" : path === href || path.startsWith(`${href}/`);
@@ -50,24 +55,66 @@ export function NavLinks({ path }: { path: string }) {
         </nav>
         <p className="mt-auto px-3 text-[0.7rem] leading-relaxed text-muted">A personal fashion journal. Your data stays on this computer.</p>
       </aside>
-      <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-card/95 backdrop-blur md:hidden">
-        <div className="mx-auto flex max-w-lg px-0.5 pb-[env(safe-area-inset-bottom)]">
-          {ITEMS.map(({ href, label, icon: Icon }) => (
+      <MobileNav path={path} />
+    </>
+  );
+}
+
+function MobileNav({ path }: { path: string }) {
+  const [more, setMore] = useState(false);
+  const sheet = useRef<HTMLDivElement>(null);
+  const moreActive = SECONDARY.some((i) => isActive(path, i.href));
+  useEffect(() => {
+    if (!more) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setMore(false);
+    const onDown = (e: PointerEvent) => {
+      if (!sheet.current?.contains(e.target as Node) && !(e.target as Element).closest?.("[data-more-toggle]")) setMore(false);
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onDown);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onDown);
+    };
+  }, [more]);
+  const tab = "flex min-h-14 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-0.5 text-[0.68rem]";
+  return (
+    <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-card/95 backdrop-blur md:hidden">
+      {more ? (
+        <div ref={sheet} id="more-menu" className="absolute inset-x-2 bottom-full mb-2 overflow-hidden rounded-2xl border border-line bg-card shadow-card">
+          {SECONDARY.map(({ href, label, icon: Icon }) => (
             <Link
               key={href}
               href={href}
+              onClick={() => setMore(false)}
               aria-current={isActive(path, href) ? "page" : undefined}
-              className={cx(
-                "flex min-w-0 flex-1 flex-col items-center gap-0.5 px-0.5 py-2 text-[0.6rem]",
-                isActive(path, href) ? "text-accent" : "text-muted",
-              )}
+              className={cx("flex min-h-12 items-center gap-3 border-b border-line px-4 text-sm last:border-b-0", isActive(path, href) ? "text-accent" : "text-ink")}
             >
               <Icon size={19} />
-              <span className="max-w-full truncate">{label.replace("Style profile", "Profile")}</span>
+              {label}
             </Link>
           ))}
         </div>
-      </nav>
-    </>
+      ) : null}
+      <div className="mx-auto flex max-w-lg px-1 pb-[env(safe-area-inset-bottom)]">
+        {PRIMARY.map(({ href, label, icon: Icon }) => (
+          <Link key={href} href={href} onClick={() => setMore(false)} aria-current={isActive(path, href) ? "page" : undefined} className={cx(tab, isActive(path, href) ? "text-accent" : "text-muted")}>
+            <Icon size={21} />
+            <span className="max-w-full truncate">{label}</span>
+          </Link>
+        ))}
+        <button
+          type="button"
+          data-more-toggle
+          aria-expanded={more}
+          aria-controls="more-menu"
+          onClick={() => setMore((m) => !m)}
+          className={cx(tab, more || moreActive ? "text-accent" : "text-muted")}
+        >
+          <MenuDotsIcon size={21} />
+          <span>More</span>
+        </button>
+      </div>
+    </nav>
   );
 }

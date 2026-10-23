@@ -15,9 +15,13 @@ const child = spawn(process.execPath, [path.resolve("node_modules/next/dist/bin/
     ...process.env,
     DATABASE_PATH: path.join(dir, "e2e.db"),
     UPLOADS_DIR: path.join(dir, "uploads"),
-    // Claude disabled so runs are free and deterministic.
+    // No real AI providers: runs are free and deterministic. Tests that need a model add the
+    // local mock server (scripts/e2e-mock-ai.mjs) as an OpenAI-compatible endpoint.
     ANTHROPIC_API_KEY: "",
-    AI_DISABLED: "1",
+    ANTHROPIC_AUTH_TOKEN: "",
+    OPENAI_API_KEY: "",
+    GEMINI_API_KEY: "",
+    GOOGLE_API_KEY: "",
     TZ: process.env.TZ ?? "Europe/London",
   },
 });

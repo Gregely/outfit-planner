@@ -33,7 +33,8 @@ export function Button({
       aria-busy={busy || undefined}
       className={cx(
         "inline-flex items-center justify-center gap-1.5 rounded-full font-medium whitespace-nowrap transition disabled:cursor-not-allowed disabled:opacity-55",
-        size === "sm" ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm",
+        // touch screens get at least 44px (md) / 36px (sm) targets
+        size === "sm" ? "px-3 py-1.5 text-xs pointer-coarse:min-h-9" : "px-4 py-2 text-sm pointer-coarse:min-h-11",
         VARIANTS[variant],
         className,
       )}
@@ -50,7 +51,8 @@ export function ButtonLink({ href, variant = "secondary", size = "md", className
       href={href}
       className={cx(
         "inline-flex items-center justify-center gap-1.5 rounded-full font-medium whitespace-nowrap transition",
-        size === "sm" ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm",
+        // touch screens get at least 44px (md) / 36px (sm) targets
+        size === "sm" ? "px-3 py-1.5 text-xs pointer-coarse:min-h-9" : "px-4 py-2 text-sm pointer-coarse:min-h-11",
         VARIANTS[variant],
         className,
       )}

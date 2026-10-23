@@ -24,14 +24,22 @@ html.native-app body {
   overscroll-behavior-y: none;
   -webkit-tap-highlight-color: transparent;
 }
+/* Edge-to-edge: Capacitor's SystemBars plugin provides --safe-area-inset-* on Android. */
+html.native-app {
+  --inset-top: max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px));
+  --inset-bottom: max(env(safe-area-inset-bottom, 0px), var(--safe-area-inset-bottom, 0px));
+}
 html.native-app main {
-  padding-top: max(1.5rem, calc(env(safe-area-inset-top) + 0.75rem));
+  padding-top: calc(var(--inset-top) + 1rem);
+}
+html.native-app nav[aria-label="Main"].fixed > div {
+  padding-bottom: var(--inset-bottom);
 }
 
 .offline-banner {
   position: fixed;
   left: 0.75rem;
   right: 0.75rem;
-  bottom: calc(4.5rem + env(safe-area-inset-bottom));
+  bottom: calc(4.5rem + var(--inset-bottom, env(safe-area-inset-bottom, 0px)));
   z-index: 45;
 }

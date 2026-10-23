@@ -80,7 +80,7 @@ export function PlannerWeek({ start, today, days, weatherStatus, units, savedOut
         </p>
       ) : null}
       <div className="mb-5 space-y-2">
-        {!ai.enabled && ai.reason ? <Notice tone="info">{ai.reason} – the rule-based stylist plans the week. Suggestions are marked “Rule-based”.</Notice> : null}
+        {!ai.enabled && ai.reason ? <Notice tone="info">{ai.reason.charAt(0).toUpperCase() + ai.reason.slice(1)} – the rule-based stylist plans the week. Suggestions are marked “Rule-based”.</Notice> : null}
         {!weatherStatus.location ? (
           <Notice tone="info">
             No location set, so outfits use typical seasonal weather. <Link href="/settings" className="link">Add your location</Link> or set a day&apos;s weather by hand.

@@ -18,6 +18,24 @@ async function readRaw(path: string): Promise<string | Blob | null> {
   }
 }
 
+export async function exists(path: string): Promise<boolean> {
+  try {
+    await Filesystem.stat({ path, directory: DIR });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Read a file that must be readable if it exists: errors other than "missing" are thrown. */
+export async function readExisting(path: string): Promise<Uint8Array | null> {
+  if (!(await exists(path))) return null;
+  const res = await Filesystem.readFile({ path, directory: DIR });
+  const data = res.data;
+  if (typeof data === "string") return data.length ? base64ToBytes(data) : new Uint8Array();
+  return new Uint8Array(await data.arrayBuffer());
+}
+
 export async function readBytes(path: string): Promise<Uint8Array | null> {
   const data = await readRaw(path);
   if (data === null) return null;

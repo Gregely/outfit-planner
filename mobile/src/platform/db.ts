@@ -5,7 +5,7 @@ import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import * as schema from "@/server/db/schema";
 import { CATEGORIES, DEFAULT_CARE } from "@/lib/domain";
 import journal from "../../../drizzle/meta/_journal.json";
-import { readBytes, writeBytesAtomic } from "./storage";
+import { readExisting, writeBytesAtomic } from "./storage";
 
 /**
  * The Android app's database: the same SQLite schema and Drizzle queries as the web app, run
@@ -45,7 +45,10 @@ function totalChanges(sqlite: Database): number {
 
 export async function openDatabase(): Promise<{ restored: boolean }> {
   const SQL = await initSqlJs({ locateFile: () => wasmUrl });
-  const bytes = await readBytes(FILE);
+  // Never start empty over data that exists but couldn't be read: errors propagate to the
+  // startup screen and nothing is written. If a save was interrupted mid-swap, the previous
+  // copy (.old) or the finished new one (.tmp) is used.
+  const bytes = (await readExisting(FILE)) ?? (await readExisting(`${FILE}.old`)) ?? (await readExisting(`${FILE}.tmp`));
   const sqlite = new SQL.Database(bytes && bytes.length ? bytes : undefined);
   sqlite.exec("PRAGMA foreign_keys = ON");
   const db = drizzle(sqlite, { schema }) as unknown as DB;

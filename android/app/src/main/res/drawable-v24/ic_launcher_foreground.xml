@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Wardrobe Studio mark (assets/icon-foreground.svg) as a vector, used by the Android 12+ splash screen. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M47.5,37.5 A6.5,6.5 0 1,1 54,44 V48"
+        android:fillColor="#00000000"
+        android:strokeColor="#26211D"
+        android:strokeWidth="4.2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M54,48 L31.5,63.5 Q29,65.5 31.8,67.5 H76.2 Q79,65.5 76.5,63.5 Z"
+        android:fillColor="#00000000"
+        android:strokeColor="#26211D"
+        android:strokeWidth="4.2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M73,30.5 L74.6,35.4 L79.5,37 L74.6,38.6 L73,43.5 L71.4,38.6 L66.5,37 L71.4,35.4 Z"
+        android:fillColor="#7A2E2A" />
+</vector>

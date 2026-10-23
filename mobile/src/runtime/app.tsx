@@ -9,9 +9,10 @@ import { afterRender } from "./hooks";
  */
 
 type PageModule = { default: ComponentType<Record<string, unknown>>; metadata?: { title?: string } };
-type Route = { pattern: RegExp; keys: string[]; score: number; load: () => Promise<PageModule> };
+type Route = { pattern: RegExp; keys: string[]; score: number; module: PageModule };
 
-const pages = import.meta.glob<PageModule>("../../../src/app/**/page.tsx");
+// Bundled eagerly: everything is local, and no navigation can fail on a missing chunk.
+const pages = import.meta.glob<PageModule>("../../../src/app/**/page.tsx", { eager: true });
 const layoutModule = import.meta.glob<{ default: ComponentType<{ children: ReactNode }> }>("../../../src/app/layout.tsx", { eager: true });
 const notFoundModule = import.meta.glob<{ default: ComponentType }>("../../../src/app/not-found.tsx", { eager: true });
 const errorModule = import.meta.glob<{ default: ComponentType<{ error: Error; reset: () => void }> }>("../../../src/app/error.tsx", { eager: true });
@@ -21,7 +22,7 @@ const NotFound = Object.values(notFoundModule)[0].default;
 const ErrorPage = Object.values(errorModule)[0].default;
 
 export const routes: Route[] = Object.entries(pages)
-  .map(([file, load]) => {
+  .map(([file, module]) => {
     const segments = file.replace(/^.*\/src\/app/, "").replace(/\/page\.tsx$/, "").split("/").filter(Boolean);
     const keys: string[] = [];
     const parts = segments.map((s) => {
@@ -34,7 +35,7 @@ export const routes: Route[] = Object.entries(pages)
     });
     // static segments outrank dynamic ones (/wardrobe/new before /wardrobe/[id])
     const score = segments.reduce((n, s) => n * 2 + (s.startsWith("[") ? 0 : 1), 1);
-    return { pattern: new RegExp(`^/${parts.join("/")}/?$`), keys, score, load };
+    return { pattern: new RegExp(`^/${parts.join("/")}/?$`), keys, score, module };
   })
   .sort((a, b) => b.score - a.score || b.keys.length - a.keys.length);
 
@@ -57,7 +58,7 @@ async function buildPage(url: URL): Promise<{ tree: ReactNode; params: Record<st
     setTitle("Not found");
     return { tree: await resolveNode(wrap(createElement(NotFound))), params: {} };
   }
-  const mod = await match.route.load();
+  const mod = match.route.module;
   const searchParams: Record<string, string | string[]> = {};
   for (const [k, v] of new URLSearchParams(url.search)) {
     const prev = searchParams[k];
@@ -126,7 +127,11 @@ export function App({ splash }: { splash: ReactNode }) {
           void navigate(err.url, { replace: true });
           return;
         }
-        throw err;
+        console.error("[app] navigation failed", err);
+        if (token === latest) {
+          const error = err instanceof Error ? err : new Error(String(err));
+          setView((v) => ({ tree: <ErrorPage error={error} reset={() => void refresh()} />, version: (v?.version ?? 0) + 1 }));
+        }
       } finally {
         clearTimeout(slow);
         if (token === latest) setBusy(false);
